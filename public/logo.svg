@@ -1,0 +1,35 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer circle -->
+  <circle cx="100" cy="100" r="95" fill="none" stroke="#d4af37" stroke-width="2" opacity="0.5"/>
+  
+  <!-- Scissors -->
+  <g transform="translate(100, 100)">
+    <!-- Left handle -->
+    <circle cx="-25" cy="-35" r="8" fill="none" stroke="#d4af37" stroke-width="2.5"/>
+    <!-- Right handle -->
+    <circle cx="25" cy="-35" r="8" fill="none" stroke="#d4af37" stroke-width="2.5"/>
+    
+    <!-- Left blade -->
+    <path d="M -25 -35 L -15 10 L -25 15 Z" fill="#d4af37" opacity="0.9"/>
+    <!-- Right blade -->
+    <path d="M 25 -35 L 15 10 L 25 15 Z" fill="#d4af37" opacity="0.9"/>
+    
+    <!-- Center screw -->
+    <circle cx="0" cy="-10" r="4" fill="#d4af37"/>
+  </g>
+  
+  <!-- Comb -->
+  <g transform="translate(100, 130)">
+    <rect x="-30" y="0" width="60" height="8" fill="#d4af37" opacity="0.9"/>
+    <rect x="-28" y="8" width="4" height="12" fill="#d4af37" opacity="0.9"/>
+    <rect x="-20" y="8" width="4" height="12" fill="#d4af37" opacity="0.9"/>
+    <rect x="-12" y="8" width="4" height="12" fill="#d4af37" opacity="0.9"/>
+    <rect x="-4" y="8" width="4" height="12" fill="#d4af37" opacity="0.9"/>
+    <rect x="4" y="8" width="4" height="12" fill="#d4af37" opacity="0.9"/>
+    <rect x="12" y="8" width="4" height="12" fill="#d4af37" opacity="0.9"/>
+    <rect x="20" y="8" width="4" height="12" fill="#d4af37" opacity="0.9"/>
+  </g>
+  
+  <!-- Inner decorative circle -->
+  <circle cx="100" cy="100" r="85" fill="none" stroke="#d4af37" stroke-width="1" opacity="0.3" stroke-dasharray="5,5"/>
+</svg>
