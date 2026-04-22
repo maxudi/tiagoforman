@@ -20,11 +20,8 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-
-# Install production dependencies only
-RUN npm ci --production
+# Install serve globally
+RUN npm install -g serve
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
@@ -32,5 +29,5 @@ COPY --from=builder /app/dist ./dist
 # Expose port
 EXPOSE 3000
 
-# Start the application
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "3000"]
+# Start the application with serve
+CMD ["serve", "-s", "dist", "-l", "3000"]
