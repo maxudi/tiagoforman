@@ -170,15 +170,21 @@ DECLARE
   service_duration INTEGER;
   service_buffer INTEGER;
 BEGIN
-  -- Buscar duração e buffer do serviço
-  SELECT duration_minutes, COALESCE(buffer_time_minutes, 0)
-  INTO service_duration, service_buffer
-  FROM services
-  WHERE id = NEW.service_id;
-  
-  -- Calcular horário de término
-  NEW.scheduled_end_time := NEW.scheduled_time + 
-    ((service_duration + service_buffer) * INTERVAL '1 minute');
+  -- Só calcular se scheduled_end_time for NULL ou se o service_id mudou
+  IF TG_OP = 'INSERT' OR 
+     NEW.scheduled_end_time IS NULL OR 
+     (TG_OP = 'UPDATE' AND OLD.service_id IS DISTINCT FROM NEW.service_id) THEN
+    
+    -- Buscar duração e buffer do serviço
+    SELECT duration_minutes, COALESCE(buffer_time_minutes, 0)
+    INTO service_duration, service_buffer
+    FROM services
+    WHERE id = NEW.service_id;
+    
+    -- Calcular horário de término
+    NEW.scheduled_end_time := NEW.scheduled_time + 
+      ((service_duration + service_buffer) * INTERVAL '1 minute');
+  END IF;
   
   RETURN NEW;
 END;
@@ -187,7 +193,6 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER set_appointment_end_time
   BEFORE INSERT OR UPDATE ON appointments
   FOR EACH ROW 
-  WHEN (NEW.scheduled_end_time IS NULL OR OLD.service_id IS DISTINCT FROM NEW.service_id)
   EXECUTE FUNCTION calculate_appointment_end_time();
 
 -- =====================================================
@@ -362,25 +367,25 @@ RETURNS TABLE (
   available_slots INTEGER
 ) AS $$
 DECLARE
-  current_date DATE := CURRENT_DATE;
-  end_date DATE := CURRENT_DATE + p_days_ahead;
+  check_date DATE := CURRENT_DATE;
+  final_date DATE := CURRENT_DATE + p_days_ahead;
 BEGIN
-  WHILE current_date <= end_date LOOP
+  WHILE check_date <= final_date LOOP
     RETURN QUERY
     SELECT 
-      current_date,
+      check_date,
       COUNT(*)::INTEGER
     FROM get_available_time_slots(
       p_organization_id,
       p_employee_id,
       p_service_id,
-      current_date
+      check_date
     )
     WHERE is_available = true
-    GROUP BY current_date
+    GROUP BY check_date
     HAVING COUNT(*) > 0;
     
-    current_date := current_date + INTERVAL '1 day';
+    check_date := check_date + INTERVAL '1 day';
   END LOOP;
 END;
 $$ LANGUAGE plpgsql;
