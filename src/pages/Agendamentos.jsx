@@ -1,97 +1,132 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+
+// Sortable Card Component
+function SortableCard({ appointment, statusConfig }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: appointment.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  const config = statusConfig[appointment.status]
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`${config.bgColor} border ${config.borderColor} rounded-lg p-4 hover:shadow-lg transition-all cursor-grab active:cursor-grabbing group`}
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1">
+          <h3 className="text-white font-semibold text-lg mb-1">{appointment.customer_name || 'Cliente'}</h3>
+          <p className="text-gray-400 text-sm">
+            {new Date(appointment.scheduled_date).toLocaleDateString('pt-BR')}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2 mb-3">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-gray-400">🕐</span>
+          <span className="text-gray-300">{appointment.scheduled_time?.slice(0, 5)}</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-gray-400">💈</span>
+          <span className="text-gray-300">{appointment.service_name || 'Serviço'}</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-gray-400">👤</span>
+          <span className="text-gray-300">{appointment.barber_name || 'Atendente'}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Droppable Column Component
+function DroppableColumn({ id, label, icon, count, color, children }) {
+  const { setNodeRef } = useDroppable({ id })
+
+  return (
+    <div ref={setNodeRef} className="bg-gray-900/30 backdrop-blur-sm rounded-xl p-4 border border-gray-800">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">{icon}</span>
+          <h3 className="text-white font-bold">{label}</h3>
+          <span className={`bg-${color}-500/20 text-${color}-400 text-xs font-bold px-2 py-1 rounded-full`}>
+            {count}
+          </span>
+        </div>
+      </div>
+      <div className="space-y-3 min-h-[200px]">
+        {children}
+      </div>
+    </div>
+  )
+}
 
 export default function Agendamentos() {
   const { userProfile } = useAuth()
-  const [viewMode, setViewMode] = useState('kanban') // 'kanban' or 'lista'
-  const [selectedStatus, setSelectedStatus] = useState('all')
+  const [viewMode, setViewMode] = useState('kanban')
+  const [appointments, setAppointments] = useState([])
+  const [barbers, setBarbers] = useState([])
+  const [services, setServices] = useState([])
+  const [customers, setCustomers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showNewModal, setShowNewModal] = useState(false)
+  const [activeId, setActiveId] = useState(null)
+  
+  // Form states for new appointment
+  const [formData, setFormData] = useState({
+    customer_id: '',
+    barber_id: '',
+    service_id: '',
+    scheduled_date: '',
+    scheduled_time: ''
+  })
+  const [availableSlots, setAvailableSlots] = useState([])
+  const [loadingSlots, setLoadingSlots] = useState(false)
 
-  // Mock data - substituir por dados do Supabase
-  const appointments = [
-    {
-      id: 1,
-      customer: 'Ricardo',
-      service: 'Combo (Corte & Barba)',
-      employee: 'João',
-      date: '31-03-2025',
-      time: '17:00',
-      status: 'aguardando',
-      daysUntil: 3
-    },
-    {
-      id: 2,
-      customer: 'Felipe',
-      service: 'Combo (Corte & Barba)',
-      employee: 'João',
-      date: '01-04-2025',
-      time: '17:00',
-      status: 'aguardando',
-      daysUntil: 4
-    },
-    {
-      id: 3,
-      customer: 'Vitor',
-      service: 'Corte',
-      employee: 'Lucas',
-      date: '29-03-2025',
-      time: '08:00',
-      status: 'confirmado',
-      daysUntil: 1
-    },
-    {
-      id: 4,
-      customer: 'Carlos',
-      service: 'Barba',
-      employee: 'Tiago',
-      date: '29-03-2025',
-      time: '09:30',
-      status: 'em_atendimento',
-      daysUntil: 0
-    },
-    {
-      id: 5,
-      customer: 'Fernando',
-      service: 'Combo (Corte & Barba)',
-      employee: 'João',
-      date: '26-03-2025',
-      time: '10:00',
-      status: 'finalizado',
-      daysUntil: -2
-    },
-    {
-      id: 6,
-      customer: 'Joaquim',
-      service: 'Combo (Corte & Barba)',
-      employee: 'João',
-      date: '02-04-2025',
-      time: '11:00',
-      status: 'finalizado',
-      daysUntil: -5
-    },
-    {
-      id: 7,
-      customer: 'Marcos',
-      service: 'Corte',
-      employee: 'Lucas',
-      date: '28-03-2025',
-      time: '11:00',
-      status: 'cancelado',
-      daysUntil: null
-    },
-    {
-      id: 8,
-      customer: 'Mauricio',
-      service: 'Combo (Corte & Barba)',
-      employee: 'Lucas',
-      date: '04-04-2025',
-      time: '11:00',
-      status: 'cancelado',
-      daysUntil: null
-    }
-  ]
+  // Drag & drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   const statusConfig = {
-    aguardando: {
+    pending: {
       label: 'Aguardando',
       icon: '📅',
       color: 'blue',
@@ -99,7 +134,7 @@ export default function Agendamentos() {
       borderColor: 'border-blue-500/30',
       textColor: 'text-blue-400'
     },
-    confirmado: {
+    confirmed: {
       label: 'Confirmado',
       icon: '✅',
       color: 'green',
@@ -107,7 +142,7 @@ export default function Agendamentos() {
       borderColor: 'border-green-500/30',
       textColor: 'text-green-400'
     },
-    em_atendimento: {
+    in_progress: {
       label: 'Em Atendimento',
       icon: '✂️',
       color: 'yellow',
@@ -115,7 +150,7 @@ export default function Agendamentos() {
       borderColor: 'border-yellow-500/30',
       textColor: 'text-yellow-400'
     },
-    finalizado: {
+    completed: {
       label: 'Finalizado',
       icon: '✅',
       color: 'green',
@@ -123,13 +158,322 @@ export default function Agendamentos() {
       borderColor: 'border-green-500/30',
       textColor: 'text-green-400'
     },
-    cancelado: {
+    cancelled: {
       label: 'Cancelado',
       icon: '🗑️',
       color: 'red',
       bgColor: 'bg-red-500/10',
       borderColor: 'border-red-500/30',
       textColor: 'text-red-400'
+    }
+  }
+
+  // Fetch data on mount
+  useEffect(() => {
+    if (userProfile?.organization_id) {
+      fetchAppointments()
+      fetchBarbers()
+      fetchServices()
+      fetchCustomers()
+    }
+  }, [userProfile?.organization_id])
+
+  // Fetch appointments
+  const fetchAppointments = async () => {
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('appointments')
+        .select(`
+          *,
+          customer:customers(id, first_name, last_name),
+          barber:barbers(id, first_name, last_name),
+          service:services(id, name, duration_minutes)
+        `)
+        .eq('organization_id', userProfile.organization_id)
+        .is('deleted_at', null)
+        .order('scheduled_date', { ascending: true })
+        .order('scheduled_time', { ascending: true })
+
+      if (error) throw error
+
+      const formatted = data.map(apt => ({
+        ...apt,
+        customer_name: apt.customer ? `${apt.customer.first_name} ${apt.customer.last_name}` : '',
+        barber_name: apt.barber ? `${apt.barber.first_name} ${apt.barber.last_name}` : '',
+        service_name: apt.service?.name || '',
+        service_duration: apt.service?.duration_minutes || 30
+      }))
+
+      setAppointments(formatted)
+    } catch (error) {
+      console.error('Erro ao carregar agendamentos:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch barbers
+  const fetchBarbers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('barbers')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id)
+        .eq('active', true)
+        .order('first_name')
+
+      if (error) throw error
+      setBarbers(data || [])
+    } catch (error) {
+      console.error('Erro ao carregar atendentes:', error)
+    }
+  }
+
+  // Fetch services
+  const fetchServices = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('services')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id)
+        .eq('active', true)
+        .order('name')
+
+      if (error) throw error
+      setServices(data || [])
+    } catch (error) {
+      console.error('Erro ao carregar serviços:', error)
+    }
+  }
+
+  // Fetch customers
+  const fetchCustomers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id)
+        .order('first_name')
+
+      if (error) throw error
+      setCustomers(data || [])
+    } catch (error) {
+      console.error('Erro ao carregar clientes:', error)
+    }
+  }
+
+  // Calculate available slots based on barber, date, and service duration
+  const calculateAvailableSlots = async (barberId, date, serviceDuration) => {
+    if (!barberId || !date) {
+      setAvailableSlots([])
+      return
+    }
+
+    try {
+      setLoadingSlots(true)
+
+      // Get barber's schedule for the selected day
+      const dayOfWeek = new Date(date + 'T00:00:00').getDay()
+      const { data: scheduleData, error: scheduleError } = await supabase
+        .from('barber_schedules')
+        .select('*, schedule:schedules(*)')
+        .eq('barber_id', barberId)
+        .eq('schedules.day_of_week', dayOfWeek)
+        .eq('schedules.is_available', true)
+
+      if (scheduleError) throw scheduleError
+
+      // Get all existing appointments for this barber on this date
+      const { data: existingAppointments, error: aptError } = await supabase
+        .from('appointments')
+        .select('scheduled_time, scheduled_end_time, service:services(duration_minutes)')
+        .eq('barber_id', barberId)
+        .eq('scheduled_date', date)
+        .neq('status', 'cancelled')
+
+      if (aptError) throw aptError
+
+      // Generate all possible slots from barber's schedule
+      const allSlots = []
+      if (scheduleData && scheduleData.length > 0) {
+        scheduleData.forEach(item => {
+          const slot = item.schedule
+          if (!slot) return
+
+          const [startHour, startMin] = slot.start_time.split(':').map(Number)
+          const [endHour, endMin] = slot.end_time.split(':').map(Number)
+
+          let currentHour = startHour
+          let currentMin = startMin
+
+          while (
+            currentHour < endHour ||
+            (currentHour === endHour && currentMin < endMin)
+          ) {
+            allSlots.push({
+              time: `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}`,
+              available: true
+            })
+
+            // Increment by 30 minutes
+            currentMin += 30
+            if (currentMin >= 60) {
+              currentMin -= 60
+              currentHour += 1
+            }
+          }
+        })
+      }
+
+      // Mark slots as unavailable based on existing appointments
+      const slotsNeeded = Math.ceil(serviceDuration / 30)
+      
+      existingAppointments.forEach(apt => {
+        const aptDuration = apt.service?.duration_minutes || 30
+        const aptSlotsNeeded = Math.ceil(aptDuration / 30)
+        const aptStartTime = apt.scheduled_time.slice(0, 5)
+        
+        const startIdx = allSlots.findIndex(s => s.time === aptStartTime)
+        if (startIdx !== -1) {
+          // Mark this slot and the next (aptSlotsNeeded - 1) slots as unavailable
+          for (let i = 0; i < aptSlotsNeeded && startIdx + i < allSlots.length; i++) {
+            allSlots[startIdx + i].available = false
+          }
+        }
+      })
+
+      // Filter to only show slots where there's enough consecutive availability
+      const availableSlotsList = allSlots.filter((slot, idx) => {
+        // Check if this slot and the next (slotsNeeded - 1) slots are available
+        for (let i = 0; i < slotsNeeded; i++) {
+          if (!allSlots[idx + i] || !allSlots[idx + i].available) {
+            return false
+          }
+        }
+        return true
+      })
+
+      setAvailableSlots(availableSlotsList)
+    } catch (error) {
+      console.error('Erro ao calcular slots disponíveis:', error)
+      setAvailableSlots([])
+    } finally {
+      setLoadingSlots(false)
+    }
+  }
+
+  // Update available slots when barber, date, or service changes
+  useEffect(() => {
+    if (formData.barber_id && formData.scheduled_date && formData.service_id) {
+      const selectedService = services.find(s => s.id === formData.service_id)
+      if (selectedService) {
+        calculateAvailableSlots(
+          formData.barber_id,
+          formData.scheduled_date,
+          selectedService.duration_minutes
+        )
+      }
+    } else {
+      setAvailableSlots([])
+    }
+  }, [formData.barber_id, formData.scheduled_date, formData.service_id])
+
+  // Handle drag end
+  const handleDragEnd = async (event) => {
+    const { active, over } = event
+
+    if (!over) {
+      setActiveId(null)
+      return
+    }
+
+    const activeAppointment = appointments.find(apt => apt.id === active.id)
+    const newStatus = over.id
+
+    if (activeAppointment && activeAppointment.status !== newStatus) {
+      try {
+        // Update in database
+        const { error } = await supabase
+          .from('appointments')
+          .update({ status: newStatus })
+          .eq('id', activeAppointment.id)
+
+        if (error) throw error
+
+        // Update local state
+        setAppointments(prev =>
+          prev.map(apt =>
+            apt.id === activeAppointment.id ? { ...apt, status: newStatus } : apt
+          )
+        )
+      } catch (error) {
+        console.error('Erro ao atualizar status:', error)
+        alert('Erro ao atualizar status do agendamento')
+      }
+    }
+
+    setActiveId(null)
+  }
+
+  const handleDragStart = (event) => {
+    setActiveId(event.active.id)
+  }
+
+  // Create new appointment
+  const handleCreateAppointment = async (e) => {
+    e.preventDefault()
+
+    if (!formData.customer_id || !formData.barber_id || !formData.service_id || !formData.scheduled_date || !formData.scheduled_time) {
+      alert('Preencha todos os campos obrigatórios')
+      return
+    }
+
+    try {
+      const selectedService = services.find(s => s.id === formData.service_id)
+      
+      // Calculate end time based on service duration
+      const [hour, min] = formData.scheduled_time.split(':').map(Number)
+      const startMinutes = hour * 60 + min
+      const endMinutes = startMinutes + (selectedService?.duration_minutes || 30)
+      const endHour = Math.floor(endMinutes / 60)
+      const endMin = endMinutes % 60
+      const scheduled_end_time = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .insert({
+          organization_id: userProfile.organization_id,
+          customer_id: formData.customer_id,
+          barber_id: formData.barber_id,
+          service_id: formData.service_id,
+          scheduled_date: formData.scheduled_date,
+          scheduled_time: formData.scheduled_time + ':00',
+          scheduled_end_time,
+          status: 'pending',
+          service_price: selectedService?.price || 0,
+          total_amount: selectedService?.price || 0
+        })
+        .select()
+
+      if (error) throw error
+
+      // Refresh appointments
+      await fetchAppointments()
+
+      // Reset form
+      setFormData({
+        customer_id: '',
+        barber_id: '',
+        service_id: '',
+        scheduled_date: '',
+        scheduled_time: ''
+      })
+      setShowNewModal(false)
+      alert('Agendamento criado com sucesso!')
+    } catch (error) {
+      console.error('Erro ao criar agendamento:', error)
+      alert('Erro ao criar agendamento: ' + error.message)
     }
   }
 
@@ -140,95 +484,42 @@ export default function Agendamentos() {
   const stats = [
     {
       label: 'Aguardando',
-      value: getAppointmentsByStatus('aguardando').length,
-      subtitle: 'Aguardando atendimento',
+      value: getAppointmentsByStatus('pending').length,
+      subtitle: 'Aguardando confirmação',
       icon: '📅',
       color: 'from-blue-500 to-blue-600'
     },
     {
       label: 'Confirmado',
-      value: getAppointmentsByStatus('confirmado').length,
+      value: getAppointmentsByStatus('confirmed').length,
       subtitle: 'Cliente confirmou',
       icon: '✅',
       color: 'from-green-500 to-green-600'
     },
     {
       label: 'Em Atendimento',
-      value: getAppointmentsByStatus('em_atendimento').length,
-      subtitle: 'Atendimentos em andamento',
+      value: getAppointmentsByStatus('in_progress').length,
+      subtitle: 'Em andamento',
       icon: '✂️',
       color: 'from-yellow-500 to-yellow-600'
     },
     {
       label: 'Finalizados',
-      value: getAppointmentsByStatus('finalizado').length,
-      subtitle: 'Atendimentos concluídos',
+      value: getAppointmentsByStatus('completed').length,
+      subtitle: 'Concluídos',
       icon: '✅',
       color: 'from-green-500 to-green-600'
     },
     {
       label: 'Cancelados',
-      value: getAppointmentsByStatus('cancelado').length,
-      subtitle: 'Agendamentos cancelados',
+      value: getAppointmentsByStatus('cancelled').length,
+      subtitle: 'Cancelados',
       icon: '🗑️',
       color: 'from-red-500 to-red-600'
     }
   ]
 
-  const AppointmentCard = ({ appointment }) => {
-    const config = statusConfig[appointment.status]
-    
-    return (
-      <div className={`${config.bgColor} border ${config.borderColor} rounded-lg p-4 hover:shadow-lg transition-all cursor-pointer group`}>
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex-1">
-            <h3 className="text-white font-semibold text-lg mb-1">{appointment.customer}</h3>
-            {appointment.daysUntil !== null && (
-              <p className="text-gray-400 text-sm">
-                {appointment.daysUntil === 0 ? 'Hoje' : appointment.daysUntil > 0 ? `em ${appointment.daysUntil} dia${appointment.daysUntil > 1 ? 's' : ''}` : `há ${Math.abs(appointment.daysUntil)} dia${Math.abs(appointment.daysUntil) > 1 ? 's' : ''}`}
-              </p>
-            )}
-          </div>
-          <button className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-white">
-            ⋮
-          </button>
-        </div>
-
-        <div className="space-y-2 mb-3">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-400">📅</span>
-            <span className="text-gray-300">{appointment.date} - {appointment.time}</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-400">💈</span>
-            <span className="text-gray-300">{appointment.service}</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-400">👤</span>
-            <span className="text-gray-300">{appointment.employee}</span>
-          </div>
-        </div>
-
-        {appointment.status === 'aguardando' && (
-          <button className="w-full py-2 px-3 bg-green-500/20 hover:bg-green-500/30 border border-green-500/50 rounded-lg text-green-400 text-sm font-medium transition-colors">
-            Confirmar Agendamento
-          </button>
-        )}
-        
-        {appointment.status === 'confirmado' && (
-          <button className="w-full py-2 px-3 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/50 rounded-lg text-yellow-400 text-sm font-medium transition-colors">
-            Iniciar Atendimento
-          </button>
-        )}
-
-        {appointment.status === 'em_atendimento' && (
-          <button className="w-full py-2 px-3 bg-green-500/20 hover:bg-green-500/30 border border-green-500/50 rounded-lg text-green-400 text-sm font-medium transition-colors">
-            Finalizar Atendimento
-          </button>
-        )}
-      </div>
-    )
-  }
+  const activeAppointment = appointments.find(apt => apt.id === activeId)
 
   return (
     <div>
@@ -262,200 +553,280 @@ export default function Agendamentos() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-bold text-white">Agendamentos</h2>
-            
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-2 bg-gray-800 rounded-lg p-1">
-              <button
-                onClick={() => setViewMode('kanban')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  viewMode === 'kanban'
-                    ? 'bg-gray-700 text-white'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                Kanban
-              </button>
-              <button
-                onClick={() => setViewMode('lista')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  viewMode === 'lista'
-                    ? 'bg-gray-700 text-white'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                Lista
-              </button>
-            </div>
           </div>
 
-          <button className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition-all text-white font-medium">
+          <button
+            onClick={() => setShowNewModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition-all text-white font-medium"
+          >
             <span className="text-xl">➕</span>
             Novo Agendamento
           </button>
         </div>
       </div>
 
-      {/* Kanban View */}
-      {viewMode === 'kanban' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Aguardando Column */}
-          <div className="bg-gray-900/30 backdrop-blur-sm rounded-xl p-4 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">📅</span>
-                <h3 className="text-white font-bold">Aguardando</h3>
-                <span className="bg-blue-500/20 text-blue-400 text-xs font-bold px-2 py-1 rounded-full">
-                  {getAppointmentsByStatus('aguardando').length}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {getAppointmentsByStatus('aguardando').map(apt => (
-                <AppointmentCard key={apt.id} appointment={apt} />
-              ))}
-            </div>
-          </div>
-
-          {/* Confirmado Column */}
-          <div className="bg-gray-900/30 backdrop-blur-sm rounded-xl p-4 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">✅</span>
-                <h3 className="text-white font-bold">Confirmado</h3>
-                <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-1 rounded-full">
-                  {getAppointmentsByStatus('confirmado').length}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {getAppointmentsByStatus('confirmado').map(apt => (
-                <AppointmentCard key={apt.id} appointment={apt} />
-              ))}
-            </div>
-          </div>
-
-          {/* Em Atendimento Column */}
-          <div className="bg-gray-900/30 backdrop-blur-sm rounded-xl p-4 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">✂️</span>
-                <h3 className="text-white font-bold">Em Atendimento</h3>
-                <span className="bg-yellow-500/20 text-yellow-400 text-xs font-bold px-2 py-1 rounded-full">
-                  {getAppointmentsByStatus('em_atendimento').length}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {getAppointmentsByStatus('em_atendimento').map(apt => (
-                <AppointmentCard key={apt.id} appointment={apt} />
-              ))}
-            </div>
-          </div>
-
-          {/* Finalizados Column */}
-          <div className="bg-gray-900/30 backdrop-blur-sm rounded-xl p-4 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">✅</span>
-                <h3 className="text-white font-bold">Finalizados</h3>
-                <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-1 rounded-full">
-                  {getAppointmentsByStatus('finalizado').length}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {getAppointmentsByStatus('finalizado').map(apt => (
-                <AppointmentCard key={apt.id} appointment={apt} />
-              ))}
-            </div>
-          </div>
-
-          {/* Cancelados Column */}
-          <div className="bg-gray-900/30 backdrop-blur-sm rounded-xl p-4 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">🗑️</span>
-                <h3 className="text-white font-bold">Cancelados</h3>
-                <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-1 rounded-full">
-                  {getAppointmentsByStatus('cancelado').length}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {getAppointmentsByStatus('cancelado').map(apt => (
-                <AppointmentCard key={apt.id} appointment={apt} />
-              ))}
-            </div>
-          </div>
+      {/* Kanban View with Drag & Drop */}
+      {loading ? (
+        <div className="text-center py-12 text-gray-400">
+          Carregando agendamentos...
         </div>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Pending Column */}
+            <SortableContext
+              id="pending"
+              items={getAppointmentsByStatus('pending').map(apt => apt.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <DroppableColumn
+                id="pending"
+                label="Aguardando"
+                icon="📅"
+                count={getAppointmentsByStatus('pending').length}
+                color="blue"
+              >
+                {getAppointmentsByStatus('pending').map(apt => (
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                ))}
+              </DroppableColumn>
+            </SortableContext>
+
+            {/* Confirmed Column */}
+            <SortableContext
+              id="confirmed"
+              items={getAppointmentsByStatus('confirmed').map(apt => apt.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <DroppableColumn
+                id="confirmed"
+                label="Confirmado"
+                icon="✅"
+                count={getAppointmentsByStatus('confirmed').length}
+                color="green"
+              >
+                {getAppointmentsByStatus('confirmed').map(apt => (
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                ))}
+              </DroppableColumn>
+            </SortableContext>
+
+            {/* In Progress Column */}
+            <SortableContext
+              id="in_progress"
+              items={getAppointmentsByStatus('in_progress').map(apt => apt.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <DroppableColumn
+                id="in_progress"
+                label="Em Atendimento"
+                icon="✂️"
+                count={getAppointmentsByStatus('in_progress').length}
+                color="yellow"
+              >
+                {getAppointmentsByStatus('in_progress').map(apt => (
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                ))}
+              </DroppableColumn>
+            </SortableContext>
+
+            {/* Completed Column */}
+            <SortableContext
+              id="completed"
+              items={getAppointmentsByStatus('completed').map(apt => apt.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <DroppableColumn
+                id="completed"
+                label="Finalizados"
+                icon="✅"
+                count={getAppointmentsByStatus('completed').length}
+                color="green"
+              >
+                {getAppointmentsByStatus('completed').map(apt => (
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                ))}
+              </DroppableColumn>
+            </SortableContext>
+
+            {/* Cancelled Column */}
+            <SortableContext
+              id="cancelled"
+              items={getAppointmentsByStatus('cancelled').map(apt => apt.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <DroppableColumn
+                id="cancelled"
+                label="Cancelados"
+                icon="🗑️"
+                count={getAppointmentsByStatus('cancelled').length}
+                color="red"
+              >
+                {getAppointmentsByStatus('cancelled').map(apt => (
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                ))}
+              </DroppableColumn>
+            </SortableContext>
+          </div>
+
+          <DragOverlay>
+            {activeId && activeAppointment && (
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 shadow-2xl">
+                <h3 className="text-white font-semibold">{activeAppointment.customer_name}</h3>
+                <p className="text-gray-400 text-sm">{activeAppointment.service_name}</p>
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
       )}
 
-      {/* Lista View */}
-      {viewMode === 'lista' && (
-        <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-800 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-800/50">
-              <tr>
-                <th className="text-left p-4 text-gray-400 font-medium">Cliente</th>
-                <th className="text-left p-4 text-gray-400 font-medium">Data/Hora</th>
-                <th className="text-left p-4 text-gray-400 font-medium">Serviço</th>
-                <th className="text-left p-4 text-gray-400 font-medium">Atendente</th>
-                <th className="text-left p-4 text-gray-400 font-medium">Status</th>
-                <th className="text-left p-4 text-gray-400 font-medium">Prazo</th>
-                <th className="text-right p-4 text-gray-400 font-medium">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800">
-              {appointments.map(apt => {
-                const config = statusConfig[apt.status]
-                return (
-                  <tr key={apt.id} className="hover:bg-gray-800/30 transition-colors">
-                    <td className="p-4">
-                      <span className="text-white font-medium">{apt.customer}</span>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-gray-300 text-sm">
-                        <div>{apt.date}</div>
-                        <div className="text-gray-500">{apt.time}</div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <span className="text-gray-300 text-sm">{apt.service}</span>
-                    </td>
-                    <td className="p-4">
-                      <span className="text-gray-300 text-sm">{apt.employee}</span>
-                    </td>
-                    <td className="p-4">
-                      <span className={`${config.bgColor} ${config.textColor} border ${config.borderColor} px-3 py-1 rounded-full text-xs font-medium inline-flex items-center gap-1`}>
-                        <span>{config.icon}</span>
-                        {config.label}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      {apt.daysUntil !== null && (
-                        <span className="text-gray-400 text-sm">
-                          {apt.daysUntil === 0 ? 'Hoje' : apt.daysUntil > 0 ? `${apt.daysUntil}d` : `há ${Math.abs(apt.daysUntil)}d`}
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
-                          👁️
-                        </button>
-                        <button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
-                          ✏️
-                        </button>
-                        <button className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors">
-                          🗑️
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+      {/* New Appointment Modal */}
+      {showNewModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white">Novo Agendamento</h2>
+              <button
+                onClick={() => setShowNewModal(false)}
+                className="text-gray-400 hover:text-white text-2xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAppointment} className="space-y-6">
+              {/* Customer Selection */}
+              <div>
+                <label className="block text-gray-300 font-medium mb-2">Cliente *</label>
+                <select
+                  value={formData.customer_id}
+                  onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                  required
+                >
+                  <option value="">Selecione um cliente</option>
+                  {customers.map(customer => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.first_name} {customer.last_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Barber Selection */}
+              <div>
+                <label className="block text-gray-300 font-medium mb-2">Atendente *</label>
+                <select
+                  value={formData.barber_id}
+                  onChange={(e) => setFormData({ ...formData, barber_id: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                  required
+                >
+                  <option value="">Selecione um atendente</option>
+                  {barbers.map(barber => (
+                    <option key={barber.id} value={barber.id}>
+                      {barber.first_name} {barber.last_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Service Selection */}
+              <div>
+                <label className="block text-gray-300 font-medium mb-2">Serviço *</label>
+                <select
+                  value={formData.service_id}
+                  onChange={(e) => setFormData({ ...formData, service_id: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                  required
+                >
+                  <option value="">Selecione um serviço</option>
+                  {services.map(service => (
+                    <option key={service.id} value={service.id}>
+                      {service.name} - {service.duration_minutes}min - R$ {service.price?.toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Date Selection */}
+              <div>
+                <label className="block text-gray-300 font-medium mb-2">Data *</label>
+                <input
+                  type="date"
+                  value={formData.scheduled_date}
+                  onChange={(e) => setFormData({ ...formData, scheduled_date: e.target.value })}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                  required
+                />
+              </div>
+
+              {/* Time Selection */}
+              <div>
+                <label className="block text-gray-300 font-medium mb-2">
+                  Horário Disponível *
+                  {formData.service_id && services.find(s => s.id === formData.service_id) && (
+                    <span className="text-gray-500 text-sm ml-2">
+                      ({services.find(s => s.id === formData.service_id).duration_minutes}min - 
+                      {Math.ceil(services.find(s => s.id === formData.service_id).duration_minutes / 30)} slot{Math.ceil(services.find(s => s.id === formData.service_id).duration_minutes / 30) > 1 ? 's' : ''})
+                    </span>
+                  )}
+                </label>
+                
+                {loadingSlots ? (
+                  <div className="text-gray-400 text-center py-4">
+                    Carregando horários disponíveis...
+                  </div>
+                ) : availableSlots.length === 0 ? (
+                  <div className="text-gray-500 text-center py-4 bg-gray-800 rounded-lg border border-gray-700">
+                    {formData.barber_id && formData.scheduled_date && formData.service_id
+                      ? 'Nenhum horário disponível para esta data'
+                      : 'Selecione atendente, serviço e data para ver horários disponíveis'}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto p-2 bg-gray-800 rounded-lg border border-gray-700">
+                    {availableSlots.map(slot => (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, scheduled_time: slot.time })}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          formData.scheduled_time === slot.time
+                            ? 'bg-purple-500 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        }`}
+                      >
+                        {slot.time}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowNewModal(false)}
+                  className="flex-1 px-6 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-white font-medium transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg text-white font-medium transition-all"
+                >
+                  Criar Agendamento
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
