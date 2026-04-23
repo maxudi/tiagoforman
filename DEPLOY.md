@@ -4,20 +4,24 @@
 
 ### 1. Variáveis de Ambiente
 
-No Easypanel, adicione as seguintes variáveis de ambiente:
+⚠️ **IMPORTANTE:** No Easypanel, adicione as seguintes variáveis de ambiente:
 
 ```env
-VITE_SUPABASE_URL=https://seu-projeto.supabase.co
-VITE_SUPABASE_ANON_KEY=sua-chave-anon-do-supabase
+VITE_SUPABASE_URL=https://ideal-supabase.yzqq8i.easypanel.host
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE
 ```
 
-**Como obter as credenciais:**
-1. Acesse [supabase.com/dashboard](https://supabase.com/dashboard)
-2. Selecione seu projeto
-3. Vá em `Settings` → `API`
-4. Copie:
-   - `Project URL` → VITE_SUPABASE_URL
-   - `anon` / `public` key → VITE_SUPABASE_ANON_KEY
+**Como adicionar no Easypanel:**
+1. Acesse seu projeto no Easypanel
+2. Vá em **Settings** → **Environment Variables** (ou **Environment**)
+3. Adicione cada variável:
+   - **Nome:** `VITE_SUPABASE_URL`
+   - **Valor:** `https://ideal-supabase.yzqq8i.easypanel.host`
+4. Adicione a segunda variável:
+   - **Nome:** `VITE_SUPABASE_ANON_KEY`
+   - **Valor:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE`
+5. **Salve** as alterações
+6. **Redeploy** o projeto
 
 ### 2. Configuração do Build
 
