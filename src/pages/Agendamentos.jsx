@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import {
@@ -20,7 +20,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
 // Sortable Card Component
-function SortableCard({ appointment, statusConfig }) {
+function SortableCard({ appointment, statusConfig, onEdit, onCancel, onDelete }) {
   const {
     attributes,
     listeners,
@@ -28,7 +28,10 @@ function SortableCard({ appointment, statusConfig }) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: appointment.id })
+  } = useSortable({ 
+    id: appointment.id,
+    disabled: appointment.status === 'cancelled'
+  })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -37,22 +40,67 @@ function SortableCard({ appointment, statusConfig }) {
   }
 
   const config = statusConfig[appointment.status]
+  const isCancelled = appointment.status === 'cancelled'
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      className={`${config.bgColor} border ${config.borderColor} rounded-lg p-4 hover:shadow-lg transition-all cursor-grab active:cursor-grabbing group`}
+      {...(isCancelled ? {} : attributes)} 
+      {...(isCancelled ? {} : listeners)}
+      className={`${config.bgColor} border ${config.borderColor} rounded-lg p-4 transition-all relative group ${!isCancelled ? 'hover:shadow-lg cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-75'}`}
     >
+      {/* Action buttons - visible on hover */}
+      <div
+        className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {!isCancelled && (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit && onEdit(appointment) }}
+              title="Editar"
+              className="w-7 h-7 flex items-center justify-center rounded bg-gray-700/80 hover:bg-blue-600 text-gray-300 hover:text-white transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onCancel && onCancel(appointment) }}
+              title="Cancelar agendamento"
+              className="w-7 h-7 flex items-center justify-center rounded bg-gray-700/80 hover:bg-yellow-600 text-gray-300 hover:text-white transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+              </svg>
+            </button>
+          </>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete && onDelete(appointment) }}
+          title="Excluir"
+          className="w-7 h-7 flex items-center justify-center rounded bg-gray-700/80 hover:bg-red-600 text-gray-300 hover:text-white transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+          </svg>
+        </button>
+      </div>
+
       <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
+        <div className="flex-1 pr-2">
           <h3 className="text-white font-semibold text-lg mb-1">{appointment.customer_name || 'Cliente'}</h3>
           <p className="text-gray-400 text-sm">
             {new Date(appointment.scheduled_date).toLocaleDateString('pt-BR')}
           </p>
         </div>
+        {isCancelled && (
+          <span className="text-red-400 text-xs font-bold bg-red-900 bg-opacity-50 px-2 py-1 rounded mt-6">
+            🚫 Cancelado
+          </span>
+        )}
       </div>
 
       <div className="space-y-2 mb-3">
@@ -69,12 +117,18 @@ function SortableCard({ appointment, statusConfig }) {
           <span className="text-gray-300">{appointment.barber_name || 'Atendente'}</span>
         </div>
       </div>
+
+      {isCancelled && appointment.cancelled_at && (
+        <div className="text-xs text-red-400 mt-3 pt-3 border-t border-red-900">
+          Cancelado em: {new Date(appointment.cancelled_at).toLocaleDateString('pt-BR')}
+        </div>
+      )}
     </div>
   )
 }
 
 // Droppable Column Component
-function DroppableColumn({ id, label, icon, count, color, children }) {
+function DroppableColumn({ id, label, icon, count, color, children, onViewAll }) {
   const { setNodeRef } = useDroppable({ id })
 
   return (
@@ -87,6 +141,18 @@ function DroppableColumn({ id, label, icon, count, color, children }) {
             {count}
           </span>
         </div>
+        {onViewAll && (
+          <button
+            onClick={onViewAll}
+            title="Ver todos"
+            className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-700"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+              <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+            </svg>
+          </button>
+        )}
       </div>
       <div className="space-y-3 min-h-[200px]">
         {children}
@@ -125,6 +191,32 @@ export default function Agendamentos() {
     phone: ''
   })
   const [creatingCustomer, setCreatingCustomer] = useState(false)
+
+  const [isPaused, setIsPaused] = useState(false)
+
+  // Cancelamento
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [appointmentToCancel, setAppointmentToCancel] = useState(null)
+  const [showCancelledHistory, setShowCancelledHistory] = useState(false)
+  const [showAllCancelled, setShowAllCancelled] = useState(false)
+
+  // Modal "Ver todos" genérico por status
+  const [showStatusModal, setShowStatusModal] = useState(false)
+  const [statusModalConfig, setStatusModalConfig] = useState({ label: '', status: '' })
+
+  const openStatusModal = (label, status) => {
+    setStatusModalConfig({ label, status })
+    setShowStatusModal(true)
+  }
+
+  // Edição
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [appointmentToEdit, setAppointmentToEdit] = useState(null)
+  const [editForm, setEditForm] = useState({ scheduled_date: '', scheduled_time: '', customer_notes: '' })
+
+  // Exclusão
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [appointmentToDelete, setAppointmentToDelete] = useState(null)
 
   // Drag & drop sensors
   const sensors = useSensors(
@@ -185,6 +277,10 @@ export default function Agendamentos() {
       fetchBarbers()
       fetchServices()
       fetchCustomers()
+      // Fetch pause status from DB
+      supabase.from('organizations').select('appointments_paused')
+        .eq('id', userProfile.organization_id).single()
+        .then(({ data }) => setIsPaused(data?.appointments_paused === true))
     }
   }, [userProfile?.organization_id])
 
@@ -197,7 +293,7 @@ export default function Agendamentos() {
         .select(`
           *,
           customer:customers(id, first_name, last_name),
-          barber:barbers(id, first_name, last_name),
+          barber:barbers(id, first_name, last_name, commission_rate),
           service:services(id, name, duration_minutes)
         `)
         .eq('organization_id', userProfile.organization_id)
@@ -211,6 +307,7 @@ export default function Agendamentos() {
         ...apt,
         customer_name: apt.customer ? `${apt.customer.first_name} ${apt.customer.last_name}` : '',
         barber_name: apt.barber ? `${apt.barber.first_name} ${apt.barber.last_name}` : '',
+        barber_commission_rate: parseFloat(apt.barber?.commission_rate) || 0,
         service_name: apt.service?.name || '',
         service_duration: apt.service?.duration_minutes || 30
       }))
@@ -248,7 +345,7 @@ export default function Agendamentos() {
         .from('services')
         .select('*')
         .eq('organization_id', userProfile.organization_id)
-        .eq('active', true)
+        .eq('is_active', true)
         .order('name')
 
       if (error) throw error
@@ -359,6 +456,43 @@ export default function Agendamentos() {
     }
   }
 
+  // Auto-progression: mudar status automaticamente baseado na data/hora
+  const performAutoProgression = async () => {
+    const now = new Date()
+    const todayStr = now.toISOString().split('T')[0]
+
+    for (const apt of appointments) {
+      // Ignorar cancelados e finalizados
+      if (['cancelled', 'completed'].includes(apt.status)) continue
+
+      const aptDate = apt.scheduled_date
+      const aptTime = apt.scheduled_time
+
+      // Se é hoje e está com status "pending" ou "confirmed", mover para "in_progress"
+      if (aptDate === todayStr && ['pending', 'confirmed'].includes(apt.status)) {
+        console.log(`⏳ Auto-progression: ${apt.customer_name} → Em Atendimento (hoje)`)
+        await updateAppointmentStatus(apt.id, 'in_progress')
+      }
+
+      // Se passou a data/hora marcada, mover para "completed"
+      if (aptDate < todayStr || (aptDate === todayStr && aptTime < now.toTimeString().slice(0, 5))) {
+        if (apt.status !== 'completed') {
+          console.log(`✅ Auto-progression: ${apt.customer_name} → Finalizado (passou horário)`)
+          await updateAppointmentStatus(apt.id, 'completed')
+        }
+      }
+    }
+  }
+
+  // Executar auto-progression apenas UMA VEZ após o carregamento inicial
+  const autoProgressionRan = useRef(false)
+  useEffect(() => {
+    if (appointments.length > 0 && !autoProgressionRan.current) {
+      autoProgressionRan.current = true
+      performAutoProgression()
+    }
+  }, [appointments])
+
   // Calculate available slots based on barber, date, and service duration
   // Usa appointments.status para marcar slots como indisponíveis (não 'cancelled')
   // Quando cancelado, volta a ficar disponível automaticamente
@@ -381,11 +515,13 @@ export default function Agendamentos() {
       }
       console.log(`🏢 Organization ID: ${userProfile.organization_id}`)
 
-      // Obter dia da semana
+      // Obter dia da semana - CONVERTER PARA STRING (banco armazena como "monday", "tuesday", etc)
       const dateObj = new Date(date + 'T00:00:00')
-      const dayOfWeek = dateObj.getDay()
+      const dayOfWeekNum = dateObj.getDay()
       const dayNames = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-      console.log(`📍 Dia da semana: ${dayNames[dayOfWeek]} (número: ${dayOfWeek})`)
+      const dayNamesDb = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+      const dayOfWeekStr = dayNamesDb[dayOfWeekNum]
+      console.log(`📍 Dia da semana: ${dayNames[dayOfWeekNum]} (número: ${dayOfWeekNum}, string: "${dayOfWeekStr}")`)
 
       // 1. Buscar horários cadastrados para o atendente
       console.log('\n🔎 [ETAPA 1] Buscando barber_schedules...')
@@ -402,29 +538,26 @@ export default function Agendamentos() {
       console.log(`📦 Total de barber_schedules encontrados: ${barberSchedulesData?.length || 0}`)
       
       if (barberSchedulesData && barberSchedulesData.length > 0) {
-        console.log('📋 Detalhes completos dos barber_schedules:')
-        barberSchedulesData.forEach((bs, idx) => {
+        console.log('📋 Detalhes dos primeiros 5 barber_schedules:')
+        barberSchedulesData.slice(0, 5).forEach((bs, idx) => {
           const sch = bs.schedules
-          console.log(`  [${idx}] ID: ${bs.id}`)
-          console.log(`      schedule_id: ${bs.schedule_id}`)
-          console.log(`      start_time: ${sch?.start_time}`)
-          console.log(`      end_time: ${sch?.end_time}`)
-          console.log(`      day_of_week: ${sch?.day_of_week}`)
-          console.log(`      is_active: ${sch?.is_active}`)
+          console.log(`  [${idx}] day_of_week: "${sch?.day_of_week}" (tipo: ${typeof sch?.day_of_week})`)
         })
       } else {
         console.log('❌ NENHUM barber_schedule encontrado para este atendente!')
       }
 
       // 2. Filtrar por dia da semana e ativo
-      console.log(`\n🔎 [ETAPA 2] Filtrando por dia_of_week=${dayOfWeek} e is_active=true...`)
+      console.log(`\n🔎 [ETAPA 2] Filtrando por day_of_week="${dayOfWeekStr}" e is_active=true...`)
       const scheduleForToday = barberSchedulesData
         ?.map(bs => bs.schedules)
         .filter(s => {
-          const dayMatch = s?.day_of_week === dayOfWeek
+          const dayMatch = s?.day_of_week === dayOfWeekStr
           const activeMatch = s?.is_active === true
           const passes = dayMatch && activeMatch
-          console.log(`  Verificando: day=${s?.day_of_week} (match=${dayMatch}), active=${s?.is_active} (match=${activeMatch}) → ${passes ? '✅' : '❌'}`)
+          if (passes) {
+            console.log(`  ✅ Schedule encontrado: ${s?.day_of_week} (${s?.start_time}-${s?.end_time})`)
+          }
           return passes
         })
 
@@ -432,10 +565,10 @@ export default function Agendamentos() {
       
       if (!scheduleForToday?.length) {
         console.log('⚠️ NENHUM SCHEDULE VÁLIDO para este dia da semana!')
-        console.log('   Possíveis causas:')
-        console.log('   1. Atendente não tem horários cadastrados')
-        console.log('   2. Horários não estão marcados como ativos (is_active=false)')
-        console.log('   3. Horários são para outros dias da semana')
+        console.log(`   Procurando por: "${dayOfWeekStr}"`)
+        console.log('   Dias disponíveis no banco:')
+        const uniqueDays = [...new Set(barberSchedulesData?.map(bs => bs.schedules?.day_of_week))]
+        console.log(`   ${uniqueDays.join(', ')}`)
         setAvailableSlots([])
         return
       }
@@ -569,6 +702,7 @@ export default function Agendamentos() {
   }, [formData.barber_id, formData.scheduled_date, formData.service_id, barberServices])
 
   // Handle drag end
+  // Handle drag end - with cancellation confirmation
   const handleDragEnd = async (event) => {
     const { active, over } = event
 
@@ -578,31 +712,209 @@ export default function Agendamentos() {
     }
 
     const activeAppointment = appointments.find(apt => apt.id === active.id)
-    const newStatus = over.id
 
-    if (activeAppointment && activeAppointment.status !== newStatus) {
-      try {
-        // Update in database
-        const { error } = await supabase
-          .from('appointments')
-          .update({ status: newStatus })
-          .eq('id', activeAppointment.id)
-
-        if (error) throw error
-
-        // Update local state
-        setAppointments(prev =>
-          prev.map(apt =>
-            apt.id === activeAppointment.id ? { ...apt, status: newStatus } : apt
-          )
-        )
-      } catch (error) {
-        console.error('Erro ao atualizar status:', error)
-        alert('Erro ao atualizar status do agendamento')
+    // over.id pode ser o ID da coluna (status) ou o UUID de um card
+    // Se for um UUID de card, pegamos o status daquele card como coluna destino
+    const validStatuses = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled']
+    let newStatus = over.id
+    if (!validStatuses.includes(newStatus)) {
+      // over.id é um UUID de card — descobre qual coluna esse card pertence
+      const overAppointment = appointments.find(apt => apt.id === over.id)
+      if (!overAppointment) {
+        setActiveId(null)
+        return
       }
+      newStatus = overAppointment.status
     }
 
+    if (!activeAppointment || activeAppointment.status === newStatus) {
+      setActiveId(null)
+      return
+    }
+
+    // Se movendo para "cancelled", pedir confirmação
+    if (newStatus === 'cancelled') {
+      setAppointmentToCancel(activeAppointment)
+      setShowCancelModal(true)
+      setActiveId(null)
+      return
+    }
+
+    // Perform normal status update
+    await updateAppointmentStatus(activeAppointment.id, newStatus)
     setActiveId(null)
+  }
+
+  // Update appointment status in database
+  const updateAppointmentStatus = async (appointmentId, newStatus) => {
+    try {
+      console.log(`Atualizando agendamento ${appointmentId} para status: ${newStatus}`)
+      
+      const { error } = await supabase
+        .from('appointments')
+        .update({ 
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', appointmentId)
+
+      if (error) {
+        // Retry sem updated_at (coluna pode não existir no banco)
+        const result = await supabase
+          .from('appointments')
+          .update({ status: newStatus })
+          .eq('id', appointmentId)
+        if (result.error) throw result.error
+      }
+
+      // Nunca sobrescrever agendamentos já cancelados (evita condição de corrida)
+      setAppointments(prev =>
+        prev.map(apt =>
+          apt.id === appointmentId && apt.status !== 'cancelled'
+            ? { ...apt, status: newStatus }
+            : apt
+        )
+      )
+
+    } catch (error) {
+      console.error('❌ Erro ao atualizar status:', error)
+      alert('Erro ao atualizar status do agendamento. Tente novamente.')
+    }
+  }
+
+  // Handle appointment cancellation with confirmation
+  const handleConfirmCancel = async () => {
+    if (!appointmentToCancel) return
+
+    try {
+      const now = new Date().toISOString()
+
+      // Tenta com cancelled_at e updated_at; se falhar (colunas ausentes), tenta só com status
+      let { error } = await supabase
+        .from('appointments')
+        .update({ status: 'cancelled', cancelled_at: now, updated_at: now })
+        .eq('id', appointmentToCancel.id)
+
+      if (error) {
+        console.warn('Retry sem cancelled_at/updated_at:', error.message)
+        const result = await supabase
+          .from('appointments')
+          .update({ status: 'cancelled' })
+          .eq('id', appointmentToCancel.id)
+        error = result.error
+      }
+
+      if (error) throw error
+
+      setAppointments(prev =>
+        prev.map(apt =>
+          apt.id === appointmentToCancel.id
+            ? { ...apt, status: 'cancelled', cancelled_at: now }
+            : apt
+        )
+      )
+
+      setShowCancelModal(false)
+      setAppointmentToCancel(null)
+    } catch (error) {
+      console.error('❌ Erro ao cancelar:', error)
+      alert('Erro ao cancelar agendamento. Tente novamente.')
+    }
+  }
+
+  // Handlers para ações nos cards
+  const handleCardCancel = (apt) => {
+    setAppointmentToCancel(apt)
+    setShowCancelModal(true)
+  }
+
+  const handleCardEdit = (apt) => {
+    setAppointmentToEdit(apt)
+    setEditForm({
+      scheduled_date: apt.scheduled_date,
+      scheduled_time: apt.scheduled_time?.slice(0, 5) || '',
+      customer_notes: apt.customer_notes || ''
+    })
+    setShowEditModal(true)
+  }
+
+  const handleCardDelete = (apt) => {
+    setAppointmentToDelete(apt)
+    setShowDeleteModal(true)
+  }
+
+  // Salvar edição do agendamento
+  const handleSaveEdit = async (e) => {
+    e.preventDefault()
+    if (!appointmentToEdit) return
+
+    try {
+      const [hour, min] = editForm.scheduled_time.split(':').map(Number)
+      const endMinutes = hour * 60 + min + (appointmentToEdit.service_duration || 30)
+      const scheduled_end_time = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}:00`
+
+      const updates = {
+        scheduled_date: editForm.scheduled_date,
+        scheduled_time: editForm.scheduled_time,
+        scheduled_end_time,
+        customer_notes: editForm.customer_notes
+      }
+
+      let { error } = await supabase
+        .from('appointments')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', appointmentToEdit.id)
+
+      if (error) {
+        const result = await supabase
+          .from('appointments')
+          .update(updates)
+          .eq('id', appointmentToEdit.id)
+        error = result.error
+      }
+
+      if (error) throw error
+
+      setAppointments(prev =>
+        prev.map(apt => apt.id === appointmentToEdit.id ? { ...apt, ...updates } : apt)
+      )
+
+      setShowEditModal(false)
+      setAppointmentToEdit(null)
+    } catch (error) {
+      console.error('❌ Erro ao editar:', error)
+      alert('Erro ao salvar edição. Tente novamente.')
+    }
+  }
+
+  // Excluir agendamento (soft delete)
+  const handleDeleteAppointment = async () => {
+    if (!appointmentToDelete) return
+
+    try {
+      let { error } = await supabase
+        .from('appointments')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', appointmentToDelete.id)
+
+      if (error) {
+        // Fallback: hard delete se não tiver deleted_at
+        const result = await supabase
+          .from('appointments')
+          .delete()
+          .eq('id', appointmentToDelete.id)
+        error = result.error
+      }
+
+      if (error) throw error
+
+      setAppointments(prev => prev.filter(apt => apt.id !== appointmentToDelete.id))
+      setShowDeleteModal(false)
+      setAppointmentToDelete(null)
+    } catch (error) {
+      console.error('❌ Erro ao excluir:', error)
+      alert('Erro ao excluir agendamento. Tente novamente.')
+    }
   }
 
   const handleDragStart = (event) => {
@@ -612,6 +924,11 @@ export default function Agendamentos() {
   // Create new appointment
   const handleCreateAppointment = async (e) => {
     e.preventDefault()
+
+    if (isPaused) {
+      alert('⚠️ O sistema de agendamentos está pausado. Acesse o Dashboard para reativar.')
+      return
+    }
 
     if (!formData.customer_id || !formData.barber_id || !formData.service_id || !formData.scheduled_date || !formData.scheduled_time) {
       alert('Preencha todos os campos obrigatórios')
@@ -764,6 +1081,10 @@ export default function Agendamentos() {
 
           <button
             onClick={() => {
+              if (isPaused) {
+                alert('⚠️ O sistema de agendamentos está pausado. Acesse o Dashboard para reativar.')
+                return
+              }
               setShowNewModal(true)
               // Reset all form states
               setFormData({
@@ -778,10 +1099,14 @@ export default function Agendamentos() {
               setBarberServices([])
               setAvailableSlots([])
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition-all text-white font-medium"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-white font-medium ${
+              isPaused
+                ? 'bg-gray-700 opacity-60 cursor-not-allowed'
+                : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600'
+            }`}
           >
-            <span className="text-xl">➕</span>
-            Novo Agendamento
+            <span className="text-xl">{isPaused ? '🚫' : '➕'}</span>
+            {isPaused ? 'Agend. Pausados' : 'Novo Agendamento'}
           </button>
         </div>
       </div>
@@ -811,9 +1136,11 @@ export default function Agendamentos() {
                 icon="📅"
                 count={getAppointmentsByStatus('pending').length}
                 color="blue"
+                onViewAll={getAppointmentsByStatus('pending').length > 0 ? () => openStatusModal('Aguardando', 'pending') : null}
               >
                 {getAppointmentsByStatus('pending').map(apt => (
-                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig}
+                    onEdit={handleCardEdit} onCancel={handleCardCancel} onDelete={handleCardDelete} />
                 ))}
               </DroppableColumn>
             </SortableContext>
@@ -830,9 +1157,11 @@ export default function Agendamentos() {
                 icon="✅"
                 count={getAppointmentsByStatus('confirmed').length}
                 color="green"
+                onViewAll={getAppointmentsByStatus('confirmed').length > 0 ? () => openStatusModal('Confirmado', 'confirmed') : null}
               >
                 {getAppointmentsByStatus('confirmed').map(apt => (
-                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig}
+                    onEdit={handleCardEdit} onCancel={handleCardCancel} onDelete={handleCardDelete} />
                 ))}
               </DroppableColumn>
             </SortableContext>
@@ -849,14 +1178,16 @@ export default function Agendamentos() {
                 icon="✂️"
                 count={getAppointmentsByStatus('in_progress').length}
                 color="yellow"
+                onViewAll={getAppointmentsByStatus('in_progress').length > 0 ? () => openStatusModal('Em Atendimento', 'in_progress') : null}
               >
                 {getAppointmentsByStatus('in_progress').map(apt => (
-                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig}
+                    onEdit={handleCardEdit} onCancel={handleCardCancel} onDelete={handleCardDelete} />
                 ))}
               </DroppableColumn>
             </SortableContext>
 
-            {/* Completed Column */}
+            {/* Completed Column - mostra apenas 5 últimos */}
             <SortableContext
               id="completed"
               items={getAppointmentsByStatus('completed').map(apt => apt.id)}
@@ -868,14 +1199,24 @@ export default function Agendamentos() {
                 icon="✅"
                 count={getAppointmentsByStatus('completed').length}
                 color="green"
+                onViewAll={getAppointmentsByStatus('completed').length > 0 ? () => openStatusModal('Finalizados', 'completed') : null}
               >
-                {getAppointmentsByStatus('completed').map(apt => (
-                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                {getAppointmentsByStatus('completed').slice(0, 5).map(apt => (
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig}
+                    onEdit={handleCardEdit} onCancel={handleCardCancel} onDelete={handleCardDelete} />
                 ))}
+                {getAppointmentsByStatus('completed').length > 5 && (
+                  <button
+                    onClick={() => openStatusModal('Finalizados', 'completed')}
+                    className="w-full text-xs text-gray-400 hover:text-white py-2 border border-dashed border-gray-700 hover:border-gray-500 rounded-lg transition-colors"
+                  >
+                    + {getAppointmentsByStatus('completed').length - 5} mais...
+                  </button>
+                )}
               </DroppableColumn>
             </SortableContext>
 
-            {/* Cancelled Column */}
+            {/* Cancelled Column - mostra apenas 5 últimos */}
             <SortableContext
               id="cancelled"
               items={getAppointmentsByStatus('cancelled').map(apt => apt.id)}
@@ -887,10 +1228,20 @@ export default function Agendamentos() {
                 icon="🗑️"
                 count={getAppointmentsByStatus('cancelled').length}
                 color="red"
+                onViewAll={getAppointmentsByStatus('cancelled').length > 0 ? () => openStatusModal('Cancelados', 'cancelled') : null}
               >
-                {getAppointmentsByStatus('cancelled').map(apt => (
-                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig} />
+                {getAppointmentsByStatus('cancelled').slice(0, 5).map(apt => (
+                  <SortableCard key={apt.id} appointment={apt} statusConfig={statusConfig}
+                    onEdit={handleCardEdit} onCancel={handleCardCancel} onDelete={handleCardDelete} />
                 ))}
+                {getAppointmentsByStatus('cancelled').length > 5 && (
+                  <button
+                    onClick={() => openStatusModal('Cancelados', 'cancelled')}
+                    className="w-full text-xs text-gray-400 hover:text-white py-2 border border-dashed border-gray-700 hover:border-gray-500 rounded-lg transition-colors"
+                  >
+                    + {getAppointmentsByStatus('cancelled').length - 5} mais...
+                  </button>
+                )}
               </DroppableColumn>
             </SortableContext>
           </div>
@@ -1144,6 +1495,231 @@ export default function Agendamentos() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Agendamento */}
+      {showEditModal && appointmentToEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-xl font-bold text-white">✏️ Editar Agendamento</h3>
+              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-white text-2xl leading-none">✕</button>
+            </div>
+
+            <div className="bg-gray-800 rounded-lg p-3 mb-5 border border-gray-600 text-sm text-gray-300">
+              <p><strong>Cliente:</strong> {appointmentToEdit.customer_name}</p>
+              <p className="mt-1"><strong>Serviço:</strong> {appointmentToEdit.service_name}</p>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div>
+                <label className="block text-gray-300 text-sm font-medium mb-1">Data *</label>
+                <input
+                  type="date"
+                  required
+                  value={editForm.scheduled_date}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, scheduled_date: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-300 text-sm font-medium mb-1">Horário *</label>
+                <input
+                  type="time"
+                  required
+                  value={editForm.scheduled_time}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, scheduled_time: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-300 text-sm font-medium mb-1">Observações</label>
+                <textarea
+                  rows={3}
+                  value={editForm.customer_notes}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, customer_notes: e.target.value }))}
+                  placeholder="Observações do cliente..."
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 resize-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-white font-medium transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
+                >
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmação de Exclusão */}
+      {showDeleteModal && appointmentToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full border border-red-800 shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4">🗑️ Excluir Agendamento?</h3>
+            <div className="bg-gray-800 rounded-lg p-4 mb-5 border border-gray-600 text-sm text-gray-300 space-y-1">
+              <p><strong>Cliente:</strong> {appointmentToDelete.customer_name}</p>
+              <p><strong>Atendente:</strong> {appointmentToDelete.barber_name}</p>
+              <p><strong>Serviço:</strong> {appointmentToDelete.service_name}</p>
+              <p><strong>Data/Hora:</strong> {appointmentToDelete.scheduled_date} às {appointmentToDelete.scheduled_time?.slice(0,5)}</p>
+            </div>
+            <p className="text-red-400 text-sm mb-5">Esta ação é permanente e não pode ser desfeita.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowDeleteModal(false); setAppointmentToDelete(null) }}
+                className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-white font-medium transition-colors"
+              >
+                Manter
+              </button>
+              <button
+                onClick={handleDeleteAppointment}
+                className="flex-1 px-4 py-2 bg-red-700 hover:bg-red-600 rounded-lg text-white font-medium transition-colors"
+              >
+                Excluir Definitivamente
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmação de Cancelamento */}
+      {showCancelModal && appointmentToCancel && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-md w-full border border-gray-700">
+            <h3 className="text-xl font-bold text-white mb-4">⚠️ Cancelar Agendamento?</h3>
+            
+            <div className="bg-gray-800 rounded-lg p-4 mb-6 border border-gray-700">
+              <p className="text-gray-300 mb-3">
+                <strong>Cliente:</strong> {appointmentToCancel.customer_name}
+              </p>
+              <p className="text-gray-300 mb-3">
+                <strong>Atendente:</strong> {appointmentToCancel.barber_name}
+              </p>
+              <p className="text-gray-300 mb-3">
+                <strong>Serviço:</strong> {appointmentToCancel.service_name}
+              </p>
+              <p className="text-gray-300">
+                <strong>Data/Hora:</strong> {appointmentToCancel.scheduled_date} às {appointmentToCancel.scheduled_time}
+              </p>
+            </div>
+
+            <p className="text-gray-400 mb-6">
+              O horário será liberado e disponibilizado para novos agendamentos. Esta ação pode ser consultada no histórico de cancelamentos.
+            </p>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => {
+                  setShowCancelModal(false)
+                  setAppointmentToCancel(null)
+                }}
+                className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-white font-medium transition-colors"
+              >
+                Manter
+              </button>
+              <button
+                onClick={handleConfirmCancel}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-medium transition-colors"
+              >
+                Confirmar Cancelamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Ver Todos os Cancelados */}
+      {showAllCancelled && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-2xl w-full max-h-screen overflow-y-auto border border-gray-700">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold text-white">📋 Histórico Completo de Cancelamentos</h3>
+              <button
+                onClick={() => setShowAllCancelled(false)}
+                className="text-gray-400 hover:text-white text-2xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {appointments
+                .filter(apt => apt.status === 'cancelled')
+                .sort((a, b) => new Date(b.cancelled_at) - new Date(a.cancelled_at))
+                .map((apt) => (
+                  <div key={apt.id} className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-red-500 transition-colors">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <p className="text-white font-semibold">{apt.customer_name}</p>
+                        <p className="text-gray-400 text-sm">{apt.barber_name} • {apt.service_name}</p>
+                      </div>
+                      <span className="text-red-400 text-sm">
+                        Cancelado em: {new Date(apt.cancelled_at).toLocaleDateString('pt-BR')}
+                      </span>
+                    </div>
+                    <p className="text-gray-300 text-sm">
+                      📅 {apt.scheduled_date} às {apt.scheduled_time}
+                    </p>
+                  </div>
+                ))}
+              
+              {appointments.filter(apt => apt.status === 'cancelled').length === 0 && (
+                <div className="text-gray-400 text-center py-8">
+                  Nenhum cancelamento registrado
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Ver Todos por Status */}
+      {showStatusModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col border border-gray-700 shadow-2xl">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-xl font-bold text-white">
+                📋 {statusModalConfig.label}
+                <span className="ml-2 text-sm font-normal text-gray-400">
+                  ({getAppointmentsByStatus(statusModalConfig.status).length} agendamentos)
+                </span>
+              </h3>
+              <button onClick={() => setShowStatusModal(false)} className="text-gray-400 hover:text-white text-2xl leading-none">✕</button>
+            </div>
+            <div className="overflow-y-auto space-y-3 pr-1">
+              {getAppointmentsByStatus(statusModalConfig.status).map(apt => (
+                <div key={apt.id} className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-gray-500 transition-colors">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-white font-semibold">{apt.customer_name}</p>
+                      <p className="text-gray-400 text-sm">{apt.barber_name} • {apt.service_name}</p>
+                    </div>
+                    <div className="text-right text-sm">
+                      <p className="text-gray-300">{new Date(apt.scheduled_date).toLocaleDateString('pt-BR')}</p>
+                      <p className="text-gray-400">{apt.scheduled_time?.slice(0,5)}</p>
+                    </div>
+                  </div>
+                  {apt.cancelled_at && (
+                    <p className="text-red-400 text-xs mt-2">Cancelado em: {new Date(apt.cancelled_at).toLocaleDateString('pt-BR')}</p>
+                  )}
+                </div>
+              ))}
+              {getAppointmentsByStatus(statusModalConfig.status).length === 0 && (
+                <p className="text-gray-400 text-center py-8">Nenhum agendamento neste status</p>
+              )}
+            </div>
           </div>
         </div>
       )}

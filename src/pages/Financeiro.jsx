@@ -43,8 +43,8 @@ export default function Financeiro() {
     { value: 2023, label: '2023' }
   ]
 
-  const categoriesEntrada = ['Produto', 'Serviço Avulso', 'Outros']
-  const categoriesSaida = ['Salário', 'Aluguel', 'Conta', 'Fornecedor', 'Imposto', 'Manutenção', 'Marketing', 'Outros']
+  const categoriesEntrada = ['Serviço', 'Produto', 'Serviço Avulso', 'Outros']
+  const categoriesSaida = ['Comissão', 'Salário', 'Aluguel', 'Conta', 'Fornecedor', 'Imposto', 'Manutenção', 'Marketing', 'Outros']
   const paymentMethods = [
     { value: 'cash', label: 'Dinheiro' },
     { value: 'credit_card', label: 'Cartão de Crédito' },
@@ -63,46 +63,125 @@ export default function Financeiro() {
   const fetchTransacoes = async () => {
     try {
       setLoading(true)
-      
-      let query = supabase
+
+      // Calcular intervalo de datas para filtro
+      let dateStart = null
+      let dateEnd = null
+      if (selectedYear !== 'all') {
+        if (selectedMonth !== 'all') {
+          const lastDay = new Date(selectedYear, selectedMonth, 0).getDate()
+          const monthStr = String(selectedMonth).padStart(2, '0')
+          dateStart = `${selectedYear}-${monthStr}-01`
+          dateEnd = `${selectedYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`
+        } else {
+          dateStart = `${selectedYear}-01-01`
+          dateEnd = `${selectedYear}-12-31`
+        }
+      }
+
+      // 1. Transações manuais (sem vínculo com agendamento)
+      let paymentsQuery = supabase
         .from('payments')
         .select('*')
         .eq('organization_id', userProfile.organization_id)
-      
-      // Aplicar filtros de data
-      if (selectedYear !== 'all') {
-        if (selectedMonth !== 'all') {
-          // Filtro específico: mês e ano
-          const monthStr = String(selectedMonth).padStart(2, '0')
-          const startDate = `${selectedYear}-${monthStr}-01`
-          const endDate = `${selectedYear}-${monthStr}-31`
-          query = query.gte('paid_at', startDate).lte('paid_at', endDate)
-        } else {
-          // Filtro: ano inteiro
-          const startDate = `${selectedYear}-01-01`
-          const endDate = `${selectedYear}-12-31`
-          query = query.gte('paid_at', startDate).lte('paid_at', endDate)
-        }
+        .is('appointment_id', null)
+
+      if (dateStart) {
+        paymentsQuery = paymentsQuery
+          .gte('created_at', `${dateStart}T00:00:00.000Z`)
+          .lte('created_at', `${dateEnd}T23:59:59.999Z`)
       }
-      // Se selectedYear === 'all' e selectedMonth === 'all', busca tudo (sem filtro)
-      
-      const { data, error } = await query.order('paid_at', { ascending: false })
 
-      if (error) throw error
+      // 2. Agendamentos finalizados — fonte principal de receita
+      let appointmentsQuery = supabase
+        .from('appointments')
+        .select(`
+          id, scheduled_date, total_amount, service_price,
+          customer:customers(id, first_name, last_name),
+          barber:barbers(id, first_name, last_name, commission_rate),
+          service:services(id, name)
+        `)
+        .eq('organization_id', userProfile.organization_id)
+        .eq('status', 'completed')
 
-      // Transformar dados para o formato da UI
-      const transacoesFormatadas = (data || []).map(payment => ({
+      if (dateStart) {
+        appointmentsQuery = appointmentsQuery
+          .gte('scheduled_date', dateStart)
+          .lte('scheduled_date', dateEnd)
+      }
+
+      const [paymentsResult, appointmentsResult] = await Promise.all([
+        paymentsQuery.order('created_at', { ascending: false }),
+        appointmentsQuery.order('scheduled_date', { ascending: false })
+      ])
+
+      if (paymentsResult.error) throw paymentsResult.error
+      if (appointmentsResult.error) throw appointmentsResult.error
+
+      // Formatar transações manuais
+      const manuais = (paymentsResult.data || []).map(payment => ({
         id: payment.id,
         type: payment.amount >= 0 ? 'entrada' : 'saida',
         category: payment.metadata?.category || 'Outros',
         description: payment.metadata?.description || 'Sem descrição',
         amount: Math.abs(payment.amount),
-        date: payment.paid_at ? payment.paid_at.split('T')[0] : '',
+        date: payment.paid_at
+          ? payment.paid_at.split('T')[0]
+          : payment.created_at?.split('T')[0] || '',
         paymentMethod: payment.payment_method,
-        automatic: payment.appointment_id != null
+        automatic: false
       }))
 
-      setTransacoes(transacoesFormatadas)
+      // Derivar entradas dos agendamentos finalizados
+      const deAgendamentos = []
+      for (const apt of (appointmentsResult.data || [])) {
+        const amount = parseFloat(apt.total_amount) || parseFloat(apt.service_price) || 0
+        if (amount <= 0) continue
+
+        const customerName = apt.customer
+          ? `${apt.customer.first_name} ${apt.customer.last_name}`
+          : 'Cliente'
+        const serviceName = apt.service?.name || 'Serviço'
+        const barberName = apt.barber
+          ? `${apt.barber.first_name} ${apt.barber.last_name}`
+          : 'Atendente'
+        const commissionRate = parseFloat(apt.barber?.commission_rate) || 0
+        const commissionAmount = commissionRate > 0
+          ? parseFloat((amount * commissionRate / 100).toFixed(2))
+          : 0
+
+        // Crédito: valor total do serviço
+        deAgendamentos.push({
+          id: `apt-income-${apt.id}`,
+          type: 'entrada',
+          category: 'Serviço',
+          description: `${serviceName} - ${customerName}`,
+          amount,
+          date: apt.scheduled_date,
+          paymentMethod: 'other',
+          automatic: true
+        })
+
+        // Débito: comissão do atendente
+        if (commissionAmount > 0) {
+          deAgendamentos.push({
+            id: `apt-commission-${apt.id}`,
+            type: 'saida',
+            category: 'Comissão',
+            description: `Comissão ${barberName} (${commissionRate}%) - ${serviceName}`,
+            amount: commissionAmount,
+            date: apt.scheduled_date,
+            paymentMethod: 'other',
+            automatic: true
+          })
+        }
+      }
+
+      // Mesclar e ordenar por data (mais recente primeiro)
+      const todas = [...manuais, ...deAgendamentos]
+      todas.sort((a, b) => new Date(b.date) - new Date(a.date))
+
+      setTransacoes(todas)
     } catch (error) {
       console.error('Erro ao carregar transações:', error)
     } finally {

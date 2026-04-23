@@ -1,10 +1,13 @@
+import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import AppointmentNotifier from './AppointmentNotifier'
 
 export default function AdminLayout({ children }) {
   const { userProfile, signOut } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const [collapsed, setCollapsed] = useState(false)
 
   const handleSignOut = async () => {
     await signOut()
@@ -21,27 +24,42 @@ export default function AdminLayout({ children }) {
     { path: '/admin/produtos', label: 'Produtos', icon: '🛍️' },
     { path: '/admin/funcionarios', label: 'Funcionários', icon: '👨‍💼' },
     { path: '/admin/financeiro', label: 'Financeiro', icon: '💰' },
+    { path: '/admin/relatorios', label: 'Relatórios', icon: '📈' },
+    { path: '/admin/avaliacoes', label: 'Avaliações', icon: '⭐' },
     { path: '/admin/configuracoes', label: 'Configurações', icon: '⚙️' },
   ]
 
   return (
     <div className="min-h-screen bg-black">
       {/* Header */}
-      <header className="bg-gray-900/50 backdrop-blur-sm border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <header className="bg-gray-900/50 backdrop-blur-sm border-b border-gray-800 sticky top-0 z-30">
+        <div className="px-4 sm:px-6">
           <div className="flex justify-between items-center h-16">
-            {/* Logo */}
+            {/* Left: toggle + logo */}
             <div className="flex items-center gap-3">
-              <img src="/logo.jpeg" alt="Logo" className="w-10 h-10 object-contain" />
-              <div>
-                <h1 className="text-xl font-bold text-white">Tiago Forman</h1>
-                <p className="text-xs text-gray-400">Painel Administrativo</p>
+              {/* Collapse toggle button */}
+              <button
+                onClick={() => setCollapsed(c => !c)}
+                className="text-gray-400 hover:text-white hover:bg-gray-800 p-2 rounded-lg transition-colors flex-shrink-0"
+                title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {collapsed
+                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h16" />
+                  }
+                </svg>
+              </button>
+              <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 object-contain flex-shrink-0" />
+              <div className={`overflow-hidden transition-all duration-300 ${collapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}>
+                <h1 className="text-xl font-bold text-white whitespace-nowrap">Tiago Forman</h1>
+                <p className="text-xs text-gray-400 whitespace-nowrap">Painel Administrativo</p>
               </div>
             </div>
 
-            {/* User Menu */}
+            {/* Right: user + logout */}
             <div className="flex items-center gap-4">
-              <div className="text-right">
+              <div className="text-right hidden sm:block">
                 <p className="text-sm font-medium text-white">
                   {userProfile?.first_name} {userProfile?.last_name}
                 </p>
@@ -51,7 +69,7 @@ export default function AdminLayout({ children }) {
               </div>
               <button
                 onClick={handleSignOut}
-                className="text-gray-400 hover:text-white transition-colors"
+                className="text-gray-400 hover:text-white transition-colors p-1"
                 title="Sair"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -65,32 +83,47 @@ export default function AdminLayout({ children }) {
 
       <div className="flex">
         {/* Sidebar */}
-        <aside className="w-64 min-h-[calc(100vh-4rem)] bg-gray-900/30 border-r border-gray-800">
-          <nav className="p-4 space-y-2">
-            {menuItems.map((item) => (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                  location.pathname === item.path
-                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
-                }`}
-              >
-                <span className="text-xl">{item.icon}</span>
-                <span className="font-medium">{item.label}</span>
-              </Link>
-            ))}
+        <aside
+          className={`
+            flex-shrink-0 min-h-[calc(100vh-4rem)] bg-gray-900/30 border-r border-gray-800
+            transition-all duration-300 ease-in-out
+            ${collapsed ? 'w-16' : 'w-64'}
+          `}
+        >
+          <nav className={`p-2 space-y-1 ${collapsed ? 'px-2' : 'p-4'}`}>
+            {menuItems.map((item) => {
+              const active = location.pathname === item.path
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  title={collapsed ? item.label : undefined}
+                  className={`flex items-center rounded-lg transition-colors ${
+                    collapsed ? 'justify-center px-2 py-3' : 'gap-3 px-4 py-3'
+                  } ${
+                    active
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                  }`}
+                >
+                  <span className="text-xl flex-shrink-0">{item.icon}</span>
+                  {!collapsed && <span className="font-medium whitespace-nowrap">{item.label}</span>}
+                </Link>
+              )
+            })}
           </nav>
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 p-8">
+        <main className="flex-1 min-w-0 p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
         </main>
       </div>
+
+      {/* Notificações de novos agendamentos (realtime) */}
+      <AppointmentNotifier />
     </div>
   )
 }

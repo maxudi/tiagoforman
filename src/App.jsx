@@ -10,6 +10,8 @@ import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import Funcionarios from './pages/Funcionarios'
 import Financeiro from './pages/Financeiro'
+import Relatorios from './pages/Relatorios'
+import Avaliacoes from './pages/Avaliacoes'
 import Configuracoes from './pages/Configuracoes'
 import AdminLayout from './components/AdminLayout'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -37,6 +39,8 @@ function App() {
                 <Route path="produtos" element={<Produtos />} />
                 <Route path="funcionarios" element={<Funcionarios />} />
                 <Route path="financeiro" element={<Financeiro />} />
+                <Route path="relatorios" element={<Relatorios />} />
+                <Route path="avaliacoes" element={<Avaliacoes />} />
                 <Route path="configuracoes" element={<Configuracoes />} />
                 <Route index element={<Navigate to="/admin/dashboard" replace />} />
               </Routes>
