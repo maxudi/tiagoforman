@@ -1,6 +1,14 @@
 # Build stage
 FROM node:18-alpine AS builder
 
+# Accept build arguments
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+# Set as environment variables for the build
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+
 WORKDIR /app
 
 # Copy package files
