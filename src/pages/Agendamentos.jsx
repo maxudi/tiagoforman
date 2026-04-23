@@ -101,6 +101,7 @@ export default function Agendamentos() {
   const [appointments, setAppointments] = useState([])
   const [barbers, setBarbers] = useState([])
   const [services, setServices] = useState([])
+  const [barberServices, setBarberServices] = useState([]) // Serviços do atendente selecionado
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNewModal, setShowNewModal] = useState(false)
@@ -116,6 +117,14 @@ export default function Agendamentos() {
   })
   const [availableSlots, setAvailableSlots] = useState([])
   const [loadingSlots, setLoadingSlots] = useState(false)
+  
+  // New customer form
+  const [showNewCustomer, setShowNewCustomer] = useState(false)
+  const [newCustomer, setNewCustomer] = useState({
+    first_name: '',
+    phone: ''
+  })
+  const [creatingCustomer, setCreatingCustomer] = useState(false)
 
   // Drag & drop sensors
   const sensors = useSensors(
@@ -263,6 +272,91 @@ export default function Agendamentos() {
     }
   }
 
+  // Fetch barber services
+  const fetchBarberServices = async (barberId) => {
+    if (!barberId) {
+      setBarberServices([])
+      return
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('barber_services')
+        .select(`
+          service_id,
+          custom_price,
+          custom_duration_minutes,
+          service:services(
+            id,
+            name,
+            duration_minutes,
+            price
+          )
+        `)
+        .eq('barber_id', barberId)
+
+      if (error) throw error
+
+      const formattedServices = data.map(bs => ({
+        id: bs.service.id,
+        name: bs.service.name,
+        duration_minutes: bs.custom_duration_minutes || bs.service.duration_minutes,
+        price: bs.custom_price || bs.service.price
+      }))
+
+      setBarberServices(formattedServices)
+    } catch (error) {
+      console.error('Erro ao carregar serviços do atendente:', error)
+      setBarberServices([])
+    }
+  }
+
+  // Create quick customer
+  const handleCreateQuickCustomer = async () => {
+    if (!newCustomer.first_name || !newCustomer.phone) {
+      alert('Preencha nome e telefone do cliente')
+      return
+    }
+
+    try {
+      setCreatingCustomer(true)
+      
+      // Remove formatting from phone
+      const cleanPhone = newCustomer.phone.replace(/\D/g, '')
+      
+      const { data, error } = await supabase
+        .from('customers')
+        .insert({
+          organization_id: userProfile.organization_id,
+          first_name: newCustomer.first_name,
+          last_name: '',
+          phone: cleanPhone,
+          email: ''
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Add to customers list
+      setCustomers(prev => [...prev, data])
+      
+      // Select this customer
+      setFormData({ ...formData, customer_id: data.id })
+      
+      // Reset form
+      setNewCustomer({ first_name: '', phone: '' })
+      setShowNewCustomer(false)
+      
+      alert('Cliente cadastrado com sucesso!')
+    } catch (error) {
+      console.error('Erro ao criar cliente:', error)
+      alert('Erro ao cadastrar cliente: ' + error.message)
+    } finally {
+      setCreatingCustomer(false)
+    }
+  }
+
   // Calculate available slots based on barber, date, and service duration
   const calculateAvailableSlots = async (barberId, date, serviceDuration) => {
     if (!barberId || !date) {
@@ -363,10 +457,19 @@ export default function Agendamentos() {
     }
   }
 
+  // Fetch barber services when barber is selected
+  useEffect(() => {
+    if (formData.barber_id) {
+      fetchBarberServices(formData.barber_id)
+      // Reset service selection when barber changes
+      setFormData(prev => ({ ...prev, service_id: '' }))
+    }
+  }, [formData.barber_id])
+
   // Update available slots when barber, date, or service changes
   useEffect(() => {
     if (formData.barber_id && formData.scheduled_date && formData.service_id) {
-      const selectedService = services.find(s => s.id === formData.service_id)
+      const selectedService = barberServices.find(s => s.id === formData.service_id)
       if (selectedService) {
         calculateAvailableSlots(
           formData.barber_id,
@@ -377,7 +480,7 @@ export default function Agendamentos() {
     } else {
       setAvailableSlots([])
     }
-  }, [formData.barber_id, formData.scheduled_date, formData.service_id])
+  }, [formData.barber_id, formData.scheduled_date, formData.service_id, barberServices])
 
   // Handle drag end
   const handleDragEnd = async (event) => {
@@ -430,7 +533,7 @@ export default function Agendamentos() {
     }
 
     try {
-      const selectedService = services.find(s => s.id === formData.service_id)
+      const selectedService = barberServices.find(s => s.id === formData.service_id)
       
       // Calculate end time based on service duration
       const [hour, min] = formData.scheduled_time.split(':').map(Number)
@@ -469,6 +572,9 @@ export default function Agendamentos() {
         scheduled_date: '',
         scheduled_time: ''
       })
+      setShowNewCustomer(false)
+      setNewCustomer({ first_name: '', phone: '' })
+      setBarberServices([])
       setShowNewModal(false)
       alert('Agendamento criado com sucesso!')
     } catch (error) {
@@ -556,7 +662,21 @@ export default function Agendamentos() {
           </div>
 
           <button
-            onClick={() => setShowNewModal(true)}
+            onClick={() => {
+              setShowNewModal(true)
+              // Reset all form states
+              setFormData({
+                customer_id: '',
+                barber_id: '',
+                service_id: '',
+                scheduled_date: '',
+                scheduled_time: ''
+              })
+              setShowNewCustomer(false)
+              setNewCustomer({ first_name: '', phone: '' })
+              setBarberServices([])
+              setAvailableSlots([])
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition-all text-white font-medium"
           >
             <span className="text-xl">➕</span>
@@ -703,19 +823,94 @@ export default function Agendamentos() {
               {/* Customer Selection */}
               <div>
                 <label className="block text-gray-300 font-medium mb-2">Cliente *</label>
-                <select
-                  value={formData.customer_id}
-                  onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
-                  required
-                >
-                  <option value="">Selecione um cliente</option>
-                  {customers.map(customer => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.first_name} {customer.last_name}
-                    </option>
-                  ))}
-                </select>
+                
+                {!showNewCustomer ? (
+                  <div className="space-y-2">
+                    <select
+                      value={formData.customer_id}
+                      onChange={(e) => {
+                        if (e.target.value === 'new') {
+                          setShowNewCustomer(true)
+                          setFormData({ ...formData, customer_id: '' })
+                        } else {
+                          setFormData({ ...formData, customer_id: e.target.value })
+                        }
+                      }}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                      required={!showNewCustomer}
+                    >
+                      <option value="">Selecione um cliente</option>
+                      <option value="new" className="text-purple-400">➕ Novo Cliente (Pré-cadastro)</option>
+                      {customers.map(customer => (
+                        <option key={customer.id} value={customer.id}>
+                          {customer.first_name} {customer.last_name} {customer.phone ? `- ${customer.phone}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="bg-gray-800/50 border border-purple-500/30 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-purple-400 font-medium text-sm">⚡ Pré-cadastro Rápido</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewCustomer(false)
+                          setNewCustomer({ first_name: '', phone: '' })
+                        }}
+                        className="text-gray-400 hover:text-white text-sm"
+                      >
+                        ← Voltar
+                      </button>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-gray-400 text-sm mb-1">Nome *</label>
+                      <input
+                        type="text"
+                        value={newCustomer.first_name}
+                        onChange={(e) => setNewCustomer({ ...newCustomer, first_name: e.target.value })}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+                        placeholder="Nome do cliente"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-gray-400 text-sm mb-1">Telefone *</label>
+                      <input
+                        type="tel"
+                        value={newCustomer.phone}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '')
+                          let formatted = value
+                          if (value.length > 0) {
+                            formatted = value.replace(/^(\d{2})(\d)/, '($1) $2')
+                            formatted = formatted.replace(/(\d{5})(\d)/, '$1-$2')
+                          }
+                          setNewCustomer({ ...newCustomer, phone: formatted })
+                        }}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+                        placeholder="(00) 00000-0000"
+                        maxLength={15}
+                        required
+                      />
+                    </div>
+                    
+                    <button
+                      type="button"
+                      onClick={handleCreateQuickCustomer}
+                      disabled={creatingCustomer}
+                      className="w-full py-2 bg-purple-500 hover:bg-purple-600 rounded-lg text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {creatingCustomer ? 'Cadastrando...' : '✅ Cadastrar e Continuar'}
+                    </button>
+                    
+                    <p className="text-gray-500 text-xs">
+                      💡 Você pode completar o cadastro depois na tela de Clientes
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Barber Selection */}
@@ -738,20 +933,35 @@ export default function Agendamentos() {
 
               {/* Service Selection */}
               <div>
-                <label className="block text-gray-300 font-medium mb-2">Serviço *</label>
+                <label className="block text-gray-300 font-medium mb-2">
+                  Serviço *
+                  {!formData.barber_id && (
+                    <span className="text-gray-500 text-sm ml-2">(Selecione um atendente primeiro)</span>
+                  )}
+                </label>
                 <select
                   value={formData.service_id}
                   onChange={(e) => setFormData({ ...formData, service_id: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   required
+                  disabled={!formData.barber_id}
                 >
-                  <option value="">Selecione um serviço</option>
-                  {services.map(service => (
+                  <option value="">
+                    {formData.barber_id 
+                      ? 'Selecione um serviço' 
+                      : 'Primeiro selecione um atendente'}
+                  </option>
+                  {barberServices.map(service => (
                     <option key={service.id} value={service.id}>
                       {service.name} - {service.duration_minutes}min - R$ {service.price?.toFixed(2)}
                     </option>
                   ))}
                 </select>
+                {formData.barber_id && barberServices.length === 0 && (
+                  <p className="text-yellow-400 text-sm mt-2">
+                    ⚠️ Este atendente não tem serviços cadastrados
+                  </p>
+                )}
               </div>
 
               {/* Date Selection */}
@@ -771,10 +981,10 @@ export default function Agendamentos() {
               <div>
                 <label className="block text-gray-300 font-medium mb-2">
                   Horário Disponível *
-                  {formData.service_id && services.find(s => s.id === formData.service_id) && (
+                  {formData.service_id && barberServices.find(s => s.id === formData.service_id) && (
                     <span className="text-gray-500 text-sm ml-2">
-                      ({services.find(s => s.id === formData.service_id).duration_minutes}min - 
-                      {Math.ceil(services.find(s => s.id === formData.service_id).duration_minutes / 30)} slot{Math.ceil(services.find(s => s.id === formData.service_id).duration_minutes / 30) > 1 ? 's' : ''})
+                      ({barberServices.find(s => s.id === formData.service_id).duration_minutes}min - 
+                      {Math.ceil(barberServices.find(s => s.id === formData.service_id).duration_minutes / 30)} slot{Math.ceil(barberServices.find(s => s.id === formData.service_id).duration_minutes / 30) > 1 ? 's' : ''})
                     </span>
                   )}
                 </label>
