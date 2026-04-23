@@ -179,6 +179,7 @@ export default function Agendamentos() {
 
   // Fetch data on mount
   useEffect(() => {
+    console.log('Setting up appointments effect, userProfile:', userProfile?.organization_id)
     if (userProfile?.organization_id) {
       fetchAppointments()
       fetchBarbers()
@@ -225,14 +226,15 @@ export default function Agendamentos() {
   // Fetch barbers
   const fetchBarbers = async () => {
     try {
+      console.log('Fetching barbers for org:', userProfile?.organization_id)
       const { data, error } = await supabase
         .from('barbers')
         .select('*')
         .eq('organization_id', userProfile.organization_id)
-        .eq('active', true)
         .order('first_name')
 
       if (error) throw error
+      console.log('Barbers loaded:', data)
       setBarbers(data || [])
     } catch (error) {
       console.error('Erro ao carregar atendentes:', error)
@@ -366,17 +368,37 @@ export default function Agendamentos() {
 
     try {
       setLoadingSlots(true)
+      console.log('Calculating slots for barber:', barberId, 'date:', date)
 
-      // Get barber's schedule for the selected day
-      const dayOfWeek = new Date(date + 'T00:00:00').getDay()
-      const { data: scheduleData, error: scheduleError } = await supabase
+      // Get day of week (0 = Sunday, 1 = Monday, etc)
+      const dateObj = new Date(date + 'T00:00:00')
+      const dayOfWeek = dateObj.getDay()
+      console.log('Day of week:', dayOfWeek)
+
+      // Get barber's schedules for this day of week
+      const { data: barberSchedulesData, error: barberSchedulesError } = await supabase
         .from('barber_schedules')
-        .select('*, schedule:schedules(*)')
+        .select(`
+          id,
+          schedule:schedule_id(
+            id,
+            start_time,
+            end_time,
+            day_of_week,
+            is_active
+          )
+        `)
         .eq('barber_id', barberId)
-        .eq('schedules.day_of_week', dayOfWeek)
-        .eq('schedules.is_available', true)
 
-      if (scheduleError) throw scheduleError
+      if (barberSchedulesError) throw barberSchedulesError
+      console.log('Barber schedules:', barberSchedulesData)
+
+      // Filter for this day of week
+      const todaySchedules = barberSchedulesData
+        ?.map(bs => bs.schedule)
+        .filter(s => s && s.day_of_week === dayOfWeek && s.is_active)
+
+      console.log('Today schedules:', todaySchedules)
 
       // Get all existing appointments for this barber on this date
       const { data: existingAppointments, error: aptError } = await supabase
@@ -387,16 +409,16 @@ export default function Agendamentos() {
         .neq('status', 'cancelled')
 
       if (aptError) throw aptError
+      console.log('Existing appointments:', existingAppointments)
 
       // Generate all possible slots from barber's schedule
       const allSlots = []
-      if (scheduleData && scheduleData.length > 0) {
-        scheduleData.forEach(item => {
-          const slot = item.schedule
-          if (!slot) return
+      if (todaySchedules && todaySchedules.length > 0) {
+        todaySchedules.forEach(schedule => {
+          if (!schedule || !schedule.start_time || !schedule.end_time) return
 
-          const [startHour, startMin] = slot.start_time.split(':').map(Number)
-          const [endHour, endMin] = slot.end_time.split(':').map(Number)
+          const [startHour, startMin] = schedule.start_time.split(':').map(Number)
+          const [endHour, endMin] = schedule.end_time.split(':').map(Number)
 
           let currentHour = startHour
           let currentMin = startMin
@@ -406,7 +428,7 @@ export default function Agendamentos() {
             (currentHour === endHour && currentMin < endMin)
           ) {
             allSlots.push({
-              time: `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}`,
+              time: \`\${String(currentHour).padStart(2, '0')}:\${String(currentMin).padStart(2, '0')}\`,
               available: true
             })
 
@@ -419,6 +441,8 @@ export default function Agendamentos() {
           }
         })
       }
+
+      console.log('All possible slots:', allSlots.length, allSlots.slice(0, 5))
 
       // Mark slots as unavailable based on existing appointments
       const slotsNeeded = Math.ceil(serviceDuration / 30)
@@ -448,6 +472,7 @@ export default function Agendamentos() {
         return true
       })
 
+      console.log('Available slots:', availableSlotsList.length, availableSlotsList.slice(0, 5))
       setAvailableSlots(availableSlotsList)
     } catch (error) {
       console.error('Erro ao calcular slots disponíveis:', error)
