@@ -360,174 +360,122 @@ export default function Agendamentos() {
   }
 
   // Calculate available slots based on barber, date, and service duration
+  // Usa appointments.status para marcar slots como indisponíveis (não 'cancelled')
+  // Quando cancelado, volta a ficar disponível automaticamente
   const calculateAvailableSlots = async (barberId, date, serviceDuration) => {
-    if (!barberId || !date) {
+    if (!barberId || !date || !serviceDuration) {
       setAvailableSlots([])
       return
     }
 
     try {
       setLoadingSlots(true)
-      console.log('🔍 === Iniciando cálculo de slots ===')
-      console.log('Barber ID:', barberId)
-      console.log('Data:', date)
-      console.log('Duração do serviço:', serviceDuration, 'minutos')
+      console.log('🔍 === Calculando Horários Disponíveis ===')
+      console.log(`Atendente: ${barberId}, Data: ${date}, Duração: ${serviceDuration}min`)
 
-      // Get organization ID from user profile
+      // Validar organização
       if (!userProfile?.organization_id) {
-        console.error('❌ Organization ID não encontrado')
-        setAvailableSlots([])
-        setLoadingSlots(false)
-        return
+        throw new Error('Organization ID não encontrado')
       }
 
-      // Get day of week (0 = Sunday, 1 = Monday, etc)
+      // Obter dia da semana
       const dateObj = new Date(date + 'T00:00:00')
       const dayOfWeek = dateObj.getDay()
       const dayNames = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-      console.log('📍 Dia da semana:', dayOfWeek, `(${dayNames[dayOfWeek]})`)
+      console.log(`📍 Dia: ${dayNames[dayOfWeek]} (${dayOfWeek})`)
 
-      // Get barber's schedules - fetch all first
-      console.log('🔎 Buscando barber_schedules para barber_id:', barberId)
-      const { data: barberSchedulesData, error: barberSchedulesError } = await supabase
+      // 1. Buscar horários cadastrados para o atendente neste dia
+      console.log('🔎 Buscando horários cadastrados (barber_schedules)...')
+      const { data: barberSchedulesData, error: scheduleError } = await supabase
         .from('barber_schedules')
-        .select('id, schedule_id, schedules(id, start_time, end_time, day_of_week, is_active)')
+        .select('schedules(start_time, end_time, day_of_week, is_active)')
         .eq('barber_id', barberId)
 
-      if (barberSchedulesError) {
-        console.error('❌ Erro ao buscar barber_schedules:', barberSchedulesError)
-        throw barberSchedulesError
-      }
-      
-      console.log('📦 Total de barber_schedules encontrados:', barberSchedulesData?.length || 0)
-      if (barberSchedulesData && barberSchedulesData.length > 0) {
-        console.log('JSON completo de barber_schedules:', JSON.stringify(barberSchedulesData, null, 2))
-        barberSchedulesData.forEach(bs => {
-          console.log(`  - barber_schedule ${bs.id}: schedule_id=${bs.schedule_id}, schedule data:`, bs.schedules)
-        })
-      }
+      if (scheduleError) throw scheduleError
 
-      // Filter for this day of week and active schedules
-      const todaySchedules = barberSchedulesData
+      // Filtrar por dia da semana e ativo
+      const scheduleForToday = barberSchedulesData
         ?.map(bs => bs.schedules)
-        .filter(s => {
-          const matches = s && s.day_of_week === dayOfWeek && s.is_active === true
-          if (matches) {
-            console.log(`  ✅ Schedule ${s.id}: day_of_week=${s.day_of_week}, is_active=${s.is_active}, matches=true`)
-          } else if (s) {
-            console.log(`  ❌ Schedule ${s.id}: day_of_week=${s.day_of_week}, is_active=${s.is_active}, matches=false`)
-          }
-          return matches
-        }) || []
+        .filter(s => s?.day_of_week === dayOfWeek && s?.is_active)
 
-      console.log('✅ Schedules para este dia:', todaySchedules.length)
-      if (todaySchedules.length > 0) {
-        console.log('Detalhes dos schedules para hoje:', JSON.stringify(todaySchedules, null, 2))
-      } else {
-        console.log('⚠️ NENHUM SCHEDULE ENCONTRADO PARA ESTE DIA!')
+      console.log(`📦 Schedules encontrados: ${scheduleForToday?.length || 0}`)
+      if (!scheduleForToday?.length) {
+        console.log('⚠️ Nenhum horário cadastrado para este dia')
+        setAvailableSlots([])
+        return
       }
 
-      // Get all existing appointments for this barber on this date
-      const { data: existingAppointments, error: aptError } = await supabase
+      // 2. Gerar todos os slots possíveis (30min cada)
+      const allSlots = []
+      scheduleForToday.forEach(schedule => {
+        const [startH, startM] = schedule.start_time.split(':').map(Number)
+        const [endH, endM] = schedule.end_time.split(':').map(Number)
+
+        let h = startH, m = startM
+        while (h < endH || (h === endH && m < endM)) {
+          allSlots.push({
+            time: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`,
+            booked: false
+          })
+          m += 30
+          if (m >= 60) {
+            m -= 60
+            h += 1
+          }
+        }
+      })
+
+      console.log(`🕐 Slots iniciais gerados: ${allSlots.length}`)
+
+      // 3. Buscar agendamentos reservados (status !== 'cancelled')
+      // Isso marca quais slots estão ocupados
+      const { data: bookedAppointments, error: aptError } = await supabase
         .from('appointments')
         .select('scheduled_time, scheduled_end_time, service:services(duration_minutes)')
         .eq('barber_id', barberId)
         .eq('scheduled_date', date)
-        .neq('status', 'cancelled')
+        .neq('status', 'cancelled')  // Ignora cancelados - libera slot
 
       if (aptError) throw aptError
-      console.log('📅 Agendamentos existentes:', existingAppointments?.length || 0)
-      if (existingAppointments && existingAppointments.length > 0) {
-        console.log('Agendamentos:', JSON.stringify(existingAppointments, null, 2))
-      }
 
-      // Generate all possible slots from barber's schedule
-      const allSlots = []
-      if (todaySchedules && todaySchedules.length > 0) {
-        todaySchedules.forEach((schedule, idx) => {
-          if (!schedule || !schedule.start_time || !schedule.end_time) {
-            console.log(`⚠️ Schedule ${idx} inválido:`, schedule)
-            return
-          }
+      console.log(`📅 Agendamentos reservados: ${bookedAppointments?.length || 0}`)
 
-          console.log(`⏰ Processing schedule ${idx}: ${schedule.start_time} - ${schedule.end_time}`)
-
-          const [startHour, startMin] = schedule.start_time.split(':').map(Number)
-          const [endHour, endMin] = schedule.end_time.split(':').map(Number)
-
-          console.log(`  Convertido para minutos: ${startHour * 60 + startMin} - ${endHour * 60 + endMin}`)
-
-          let currentHour = startHour
-          let currentMin = startMin
-
-          while (
-            currentHour < endHour ||
-            (currentHour === endHour && currentMin < endMin)
-          ) {
-            allSlots.push({
-              time: `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}`,
-              available: true
-            })
-
-            // Increment by 30 minutes
-            currentMin += 30
-            if (currentMin >= 60) {
-              currentMin -= 60
-              currentHour += 1
-            }
-          }
-        })
-      }
-
-      console.log('🕐 Total de slots gerados:', allSlots.length)
-      if (allSlots.length > 0) {
-        console.log('Primeiros 5 slots:', allSlots.slice(0, 5))
-      } else {
-        console.log('⚠️ NENHUM SLOT FOI GERADO!')
-      }
-
-      // Mark slots as unavailable based on existing appointments
-      const slotsNeeded = Math.ceil(serviceDuration / 30)
-      console.log(`Slots necessários para serviço de ${serviceDuration}min:`, slotsNeeded)
-      
-      if (existingAppointments && existingAppointments.length > 0) {
-        existingAppointments.forEach(apt => {
+      // 4. Marcar slots como reservados (booked: true)
+      if (bookedAppointments?.length) {
+        bookedAppointments.forEach(apt => {
           const aptDuration = apt.service?.duration_minutes || 30
-          const aptSlotsNeeded = Math.ceil(aptDuration / 30)
-          const aptStartTime = apt.scheduled_time.slice(0, 5)
-          
-          const startIdx = allSlots.findIndex(s => s.time === aptStartTime)
+          const slotsOccupied = Math.ceil(aptDuration / 30)
+          const startTimeFormatted = apt.scheduled_time.substring(0, 5)
+
+          const startIdx = allSlots.findIndex(s => s.time === startTimeFormatted)
           if (startIdx !== -1) {
-            console.log(`  Bloqueando slot ${aptStartTime} (${aptSlotsNeeded} slots)`)
-            // Mark this slot and the next (aptSlotsNeeded - 1) slots as unavailable
-            for (let i = 0; i < aptSlotsNeeded && startIdx + i < allSlots.length; i++) {
-              allSlots[startIdx + i].available = false
+            console.log(`  📌 Bloqueado: ${startTimeFormatted} (${slotsOccupied} slots)`)
+            for (let i = 0; i < slotsOccupied && startIdx + i < allSlots.length; i++) {
+              allSlots[startIdx + i].booked = true
             }
           }
         })
       }
 
-      // Filter to only show slots where there's enough consecutive availability
-      const availableSlotsList = allSlots.filter((slot, idx) => {
-        // Check if this slot and the next (slotsNeeded - 1) slots are available
+      // 5. Filtrar apenas slots disponíveis com espaço suficiente para o serviço
+      const slotsNeeded = Math.ceil(serviceDuration / 30)
+      const availableSlots = allSlots.filter((slot, idx) => {
+        // Verificar se este slot e os próximos (slotsNeeded-1) estão livres
         for (let i = 0; i < slotsNeeded; i++) {
-          if (!allSlots[idx + i] || !allSlots[idx + i].available) {
+          if (!allSlots[idx + i] || allSlots[idx + i].booked) {
             return false
           }
         }
         return true
       })
 
-      console.log('✨ Slots disponíveis finais:', availableSlotsList.length)
-      if (availableSlotsList.length > 0) {
-        console.log('Primeiros 5 disponíveis:', availableSlotsList.slice(0, 5))
-      } else {
-        console.log('⚠️ NENHUM SLOT DISPONÍVEL APÓS FILTROS!')
-      }
+      console.log(`✨ Slots disponíveis finais: ${availableSlots.length}`)
+      console.log('  Contexto: slots com status.booked=false (reserved em appointments)')
+      console.log('  Ao cancelar agendamento: status muda para "cancelled" → slot fica disponível')
       
-      setAvailableSlots(availableSlotsList)
+      setAvailableSlots(availableSlots.map(s => s.time))
     } catch (error) {
-      console.error('❌ Erro ao calcular slots disponíveis:', error)
+      console.error('❌ Erro:', error.message)
       setAvailableSlots([])
     } finally {
       setLoadingSlots(false)
@@ -1102,16 +1050,16 @@ export default function Agendamentos() {
                   <div className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto p-2 bg-gray-800 rounded-lg border border-gray-700">
                     {availableSlots.map(slot => (
                       <button
-                        key={slot.time}
+                        key={slot}
                         type="button"
-                        onClick={() => setFormData({ ...formData, scheduled_time: slot.time })}
+                        onClick={() => setFormData({ ...formData, scheduled_time: slot })}
                         className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          formData.scheduled_time === slot.time
+                          formData.scheduled_time === slot
                             ? 'bg-purple-500 text-white'
                             : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                         }`}
                       >
-                        {slot.time}
+                        {slot}
                       </button>
                     ))}
                   </div>
