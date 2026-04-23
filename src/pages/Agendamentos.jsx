@@ -679,13 +679,6 @@ export default function Agendamentos() {
     return `${day}/${month}/${year} - ${getDayName(dateString)}`
   }
 
-  // Function to format date for display
-  const getFormattedDate = (dateString) => {
-    if (!dateString) return ''
-    const [year, month, day] = dateString.split('-')
-    return `${day}/${month}/${year} - ${getDayName(dateString)}`
-  }
-
   const stats = [
     {
       label: 'Aguardando',
