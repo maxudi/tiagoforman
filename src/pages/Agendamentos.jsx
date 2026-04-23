@@ -373,26 +373,25 @@ export default function Agendamentos() {
       console.log('Data:', date)
       console.log('Duração do serviço:', serviceDuration, 'minutos')
 
+      // Get organization ID from user profile
+      if (!userProfile?.organization_id) {
+        console.error('❌ Organization ID não encontrado')
+        setAvailableSlots([])
+        setLoadingSlots(false)
+        return
+      }
+
       // Get day of week (0 = Sunday, 1 = Monday, etc)
       const dateObj = new Date(date + 'T00:00:00')
       const dayOfWeek = dateObj.getDay()
       const dayNames = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-      console.log('Dia da semana:', dayOfWeek, `(${dayNames[dayOfWeek]})`)
+      console.log('📍 Dia da semana:', dayOfWeek, `(${dayNames[dayOfWeek]})`)
 
-      // Get barber's schedules for this day of week
+      // Get barber's schedules - fetch all first
+      console.log('🔎 Buscando barber_schedules para barber_id:', barberId)
       const { data: barberSchedulesData, error: barberSchedulesError } = await supabase
         .from('barber_schedules')
-        .select(`
-          id,
-          schedule_id,
-          schedules(
-            id,
-            start_time,
-            end_time,
-            day_of_week,
-            is_active
-          )
-        `)
+        .select('id, schedule_id, schedules(id, start_time, end_time, day_of_week, is_active)')
         .eq('barber_id', barberId)
 
       if (barberSchedulesError) {
@@ -400,19 +399,33 @@ export default function Agendamentos() {
         throw barberSchedulesError
       }
       
-      console.log('📦 Barber schedules encontrados:', barberSchedulesData?.length || 0)
-      console.log('Dados completos:', JSON.stringify(barberSchedulesData, null, 2))
+      console.log('📦 Total de barber_schedules encontrados:', barberSchedulesData?.length || 0)
+      if (barberSchedulesData && barberSchedulesData.length > 0) {
+        console.log('JSON completo de barber_schedules:', JSON.stringify(barberSchedulesData, null, 2))
+        barberSchedulesData.forEach(bs => {
+          console.log(`  - barber_schedule ${bs.id}: schedule_id=${bs.schedule_id}, schedule data:`, bs.schedules)
+        })
+      }
 
-      // Filter for this day of week
+      // Filter for this day of week and active schedules
       const todaySchedules = barberSchedulesData
         ?.map(bs => bs.schedules)
         .filter(s => {
-          console.log('Verificando schedule:', s)
-          return s && s.day_of_week === dayOfWeek && s.is_active
-        })
+          const matches = s && s.day_of_week === dayOfWeek && s.is_active === true
+          if (matches) {
+            console.log(`  ✅ Schedule ${s.id}: day_of_week=${s.day_of_week}, is_active=${s.is_active}, matches=true`)
+          } else if (s) {
+            console.log(`  ❌ Schedule ${s.id}: day_of_week=${s.day_of_week}, is_active=${s.is_active}, matches=false`)
+          }
+          return matches
+        }) || []
 
-      console.log('✅ Schedules para hoje:', todaySchedules?.length || 0)
-      console.log('Detalhes dos schedules:', JSON.stringify(todaySchedules, null, 2))
+      console.log('✅ Schedules para este dia:', todaySchedules.length)
+      if (todaySchedules.length > 0) {
+        console.log('Detalhes dos schedules para hoje:', JSON.stringify(todaySchedules, null, 2))
+      } else {
+        console.log('⚠️ NENHUM SCHEDULE ENCONTRADO PARA ESTE DIA!')
+      }
 
       // Get all existing appointments for this barber on this date
       const { data: existingAppointments, error: aptError } = await supabase
@@ -424,6 +437,9 @@ export default function Agendamentos() {
 
       if (aptError) throw aptError
       console.log('📅 Agendamentos existentes:', existingAppointments?.length || 0)
+      if (existingAppointments && existingAppointments.length > 0) {
+        console.log('Agendamentos:', JSON.stringify(existingAppointments, null, 2))
+      }
 
       // Generate all possible slots from barber's schedule
       const allSlots = []
@@ -434,10 +450,12 @@ export default function Agendamentos() {
             return
           }
 
-          console.log(`Processing schedule ${idx}: ${schedule.start_time} - ${schedule.end_time}`)
+          console.log(`⏰ Processing schedule ${idx}: ${schedule.start_time} - ${schedule.end_time}`)
 
           const [startHour, startMin] = schedule.start_time.split(':').map(Number)
           const [endHour, endMin] = schedule.end_time.split(':').map(Number)
+
+          console.log(`  Convertido para minutos: ${startHour * 60 + startMin} - ${endHour * 60 + endMin}`)
 
           let currentHour = startHour
           let currentMin = startMin
@@ -464,24 +482,30 @@ export default function Agendamentos() {
       console.log('🕐 Total de slots gerados:', allSlots.length)
       if (allSlots.length > 0) {
         console.log('Primeiros 5 slots:', allSlots.slice(0, 5))
+      } else {
+        console.log('⚠️ NENHUM SLOT FOI GERADO!')
       }
 
       // Mark slots as unavailable based on existing appointments
       const slotsNeeded = Math.ceil(serviceDuration / 30)
+      console.log(`Slots necessários para serviço de ${serviceDuration}min:`, slotsNeeded)
       
-      existingAppointments.forEach(apt => {
-        const aptDuration = apt.service?.duration_minutes || 30
-        const aptSlotsNeeded = Math.ceil(aptDuration / 30)
-        const aptStartTime = apt.scheduled_time.slice(0, 5)
-        
-        const startIdx = allSlots.findIndex(s => s.time === aptStartTime)
-        if (startIdx !== -1) {
-          // Mark this slot and the next (aptSlotsNeeded - 1) slots as unavailable
-          for (let i = 0; i < aptSlotsNeeded && startIdx + i < allSlots.length; i++) {
-            allSlots[startIdx + i].available = false
+      if (existingAppointments && existingAppointments.length > 0) {
+        existingAppointments.forEach(apt => {
+          const aptDuration = apt.service?.duration_minutes || 30
+          const aptSlotsNeeded = Math.ceil(aptDuration / 30)
+          const aptStartTime = apt.scheduled_time.slice(0, 5)
+          
+          const startIdx = allSlots.findIndex(s => s.time === aptStartTime)
+          if (startIdx !== -1) {
+            console.log(`  Bloqueando slot ${aptStartTime} (${aptSlotsNeeded} slots)`)
+            // Mark this slot and the next (aptSlotsNeeded - 1) slots as unavailable
+            for (let i = 0; i < aptSlotsNeeded && startIdx + i < allSlots.length; i++) {
+              allSlots[startIdx + i].available = false
+            }
           }
-        }
-      })
+        })
+      }
 
       // Filter to only show slots where there's enough consecutive availability
       const availableSlotsList = allSlots.filter((slot, idx) => {
@@ -498,7 +522,7 @@ export default function Agendamentos() {
       if (availableSlotsList.length > 0) {
         console.log('Primeiros 5 disponíveis:', availableSlotsList.slice(0, 5))
       } else {
-        console.log('⚠️ NENHUM SLOT DISPONÍVEL!')
+        console.log('⚠️ NENHUM SLOT DISPONÍVEL APÓS FILTROS!')
       }
       
       setAvailableSlots(availableSlotsList)
@@ -638,6 +662,28 @@ export default function Agendamentos() {
 
   const getAppointmentsByStatus = (status) => {
     return appointments.filter(apt => apt.status === status)
+  }
+
+  // Function to get day name from date
+  const getDayName = (dateString) => {
+    if (!dateString) return ''
+    const date = new Date(dateString + 'T00:00:00')
+    const dayNames = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+    return dayNames[date.getDay()]
+  }
+
+  // Function to format date for display
+  const getFormattedDate = (dateString) => {
+    if (!dateString) return ''
+    const [year, month, day] = dateString.split('-')
+    return `${day}/${month}/${year} - ${getDayName(dateString)}`
+  }
+
+  // Function to format date for display
+  const getFormattedDate = (dateString) => {
+    if (!dateString) return ''
+    const [year, month, day] = dateString.split('-')
+    return `${day}/${month}/${year} - ${getDayName(dateString)}`
   }
 
   const stats = [
@@ -1019,7 +1065,14 @@ export default function Agendamentos() {
 
               {/* Date Selection */}
               <div>
-                <label className="block text-gray-300 font-medium mb-2">Data *</label>
+                <label className="block text-gray-300 font-medium mb-2">
+                  Data *
+                  {formData.scheduled_date && (
+                    <span className="text-purple-400 text-sm ml-2">
+                      📅 {getFormattedDate(formData.scheduled_date)}
+                    </span>
+                  )}
+                </label>
                 <input
                   type="date"
                   value={formData.scheduled_date}
